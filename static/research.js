@@ -32,7 +32,7 @@ function renderPaperTabs(){
 async function select(id,view){
  savePaperPosition();
  setWorkspaceNav('catalog');
- document.body.classList.remove('home-mode','discovery-mode','reading-mode','knowledge-mode');window.inboxHome=false;$('#tabs').hidden=false;
+ document.body.classList.remove('home-mode','discovery-mode','reading-mode','knowledge-mode','catalog-mode');window.inboxHome=false;$('#tabs').hidden=false;
  const request=++selectionRequest;const next=await api('research/paper/'+id);if(request!==selectionRequest)return;paper=next;activeId=id;let opened=openPapers.find(p=>p.id===id);if(!opened){opened={id,title:paper.title,view:tab,scroll:0};openPapers.push(opened)}opened.title=paper.title;tab=view||opened.view||'html';opened.view=tab;$$('[data-tab]').forEach(b=>b.classList.toggle('selected',b.dataset.tab===tab));renderPaperTabs();localStorage.setItem('research.openPapers',JSON.stringify(openPapers));localStorage.setItem('research.active',id);pdfDoc=null;pdfPage=1;quote='';$('#quote-chip').hidden=true;renderList();renderHeader();renderContent();renderChat();renderProgress();$('#notes').value=paper.notes||'';$('#note-status').textContent='자동 저장';
 }
 function renderHeader(){
@@ -71,7 +71,7 @@ function renderContent(){
 function renderProgress(){
  const latest=state.jobs.find(j=>j.paper_id===activeId&&!['reader','bilingual-reader','knowledge'].includes(j.stage));const j=latest&&['queued','running','error'].includes(latest.status)?latest:null;const el=$('#progress');el.hidden=!j;if(!j)return;
  const names={queued:'대기',sources:'원문',discovery:'코드·연구실',code:'저장소',analysis:'분석',review:'검수'};
- el.innerHTML=`${j.status==='error'?'<b>분석 실패</b> · '+escape(j.error):`<button id="cancel-run">중지</button><div class="steps">${Object.entries(names).map(([k,n])=>`<span class="${j.stage===k?'current':''}">${n}</span>`).join('<span>→</span>')}</div>${escape(j.log.at(-1)?.message||'앞선 분석이 끝나면 시작합니다.')}`}`;
+ el.innerHTML=`${progressGauge(Object.keys(names).indexOf(j.stage),Object.keys(names).length,'완료 단계 · 시간 비율 아님')}${j.status==='error'?'<b>분석 실패</b> · '+escape(j.error):`<button id="cancel-run">중지</button><div class="steps">${Object.entries(names).map(([k,n])=>`<span class="${j.stage===k?'current':''}">${n}</span>`).join('<span>→</span>')}</div>${escape(j.log.at(-1)?.message||'앞선 분석이 끝나면 시작합니다.')}`}`;
  if($('#cancel-run'))$('#cancel-run').onclick=async()=>{await api('research/cancel',{id:j.id});await refresh()};
 }
 function renderChat(){
@@ -122,4 +122,6 @@ async function renderPdf(){const epoch=renderEpoch;const el=$('#content');el.inn
 renderPaperTabs();
 window.addEventListener("beforeunload",savePaperPosition);
 
-document.querySelector(".workspace-nav").addEventListener("click",savePaperPosition,true);
+document.querySelector(".workspace-nav").addEventListener("click",e=>{savePaperPosition();if(e.target.closest("button")?.id!=="catalog")document.body.classList.remove("catalog-mode")},true);
+
+function progressGauge(done,total,label){const n=Math.max(0,Math.min(total,done)),percent=total?Math.floor(n/total*100):0;return `<div class="work-progress"><div><span>${escape(label)}</span><strong>${percent}%</strong></div><progress max="${total||1}" value="${n}" aria-label="${escape(label)}"></progress><small>${n} / ${total} 단계 완료</small></div>`}

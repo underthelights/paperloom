@@ -270,6 +270,7 @@ class Handler(BaseHTTPRequestHandler):
         path=urlparse(self.path).path
         try:
             if path.startswith('/api/reader/auto/'): return self.send(reader.auto_get(path.rsplit('/',1)[1]))
+            if path.startswith('/api/discovery/progress/'):return self.send(discovery.progress(path.rsplit('/',1)[1]))
             if path=='/api/catalog': return self.send(knowledge.catalog(dict(__import__('urllib.parse',fromlist=['parse_qsl']).parse_qsl(urlparse(self.path).query))))
             if path=='/api/concepts': return self.send(knowledge.concepts())
             if path.startswith('/api/people/'): return self.send(knowledge.people(path.rsplit('/',1)[1]))

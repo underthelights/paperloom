@@ -1,8 +1,30 @@
 """External citation neighborhoods with auditable similarity scores (OpenAlex)."""
-import json,math,re,uuid,os
+import json,math,re,uuid,os,threading
 from urllib.parse import urlencode
 import research as R
-FIELDS='id,doi,title,publication_year,authorships,cited_by_count,referenced_works,related_works,primary_location,best_oa_location,abstract_inverted_index'
+FIELDS='id,doi,title,publication_year,publication_date,authorships,cited_by_count,referenced_works,related_works,primary_location,best_oa_location,abstract_inverted_index'
+
+PROGRESS={}
+GRAPH_LOCKS={}
+def progress(seed):
+    seed=wid(seed)
+    with R.LOCK:return dict(PROGRESS.get(seed,{'done':0,'total':5,'label':'조회 대기','status':'idle'}))
+def mark_progress(seed,done,label,status='running'):
+    with R.LOCK:PROGRESS[seed]={'done':done,'total':5,'label':label,'status':status}
+def graph(seed,refresh=False):
+    seed=wid(seed)
+    with R.LOCK:lock=GRAPH_LOCKS.setdefault(seed,threading.Lock())
+    with lock:
+        mark_progress(seed,0,'중심 논문 확인')
+        try:
+            result=_graph(seed,refresh)
+            failed=sum('조회 실패' in n for n in result.get('notices',[]))
+            mark_progress(seed,max(0,5-failed),'일부 조회 실패' if failed else '색인·관계 계산 완료','partial' if failed else 'done')
+            result['progress']=progress(seed)
+            return result
+        except Exception:
+            mark_progress(seed,progress(seed)['done'],'조회 중단 · 재시도 가능','error')
+            raise
 
 def request(path,**params):
     if os.environ.get('OPENALEX_API_KEY'):params['api_key']=os.environ['OPENALEX_API_KEY']
@@ -18,7 +40,7 @@ def node(work):
     abstract=' '.join(words[i] for i in sorted(words))[:12000]
     locations=[work.get('best_oa_location') or {},work.get('primary_location') or {}];url=next((v.get('landing_page_url') for v in locations if v.get('landing_page_url')),None) or work.get('doi') or work['id']
     arxiv=next((R.arxiv_id(v.get(k,'')) for v in locations for k in ('landing_page_url','pdf_url') if R.arxiv_id(v.get(k,''))),None)
-    return {'id':wid(work['id']),'title':work.get('title') or '제목 미제공','year':work.get('publication_year'),'authors':[a.get('author',{}).get('display_name','') for a in work.get('authorships',[])][:15],
+    return {'id':wid(work['id']),'title':work.get('title') or '제목 미제공','year':work.get('publication_year'),'date':work.get('publication_date'),'authors':[a.get('author',{}).get('display_name','') for a in work.get('authorships',[])][:15],
             'citations':work.get('cited_by_count',0),'doi':work.get('doi'),'url':url,'arxiv':arxiv,'abstract':abstract,'references':[wid(x) for x in work.get('referenced_works',[])],'related':[wid(x) for x in work.get('related_works',[])],'source':work['id']}
 
 def search(query):
@@ -71,19 +93,30 @@ def original_references(center):
     notice='외부 색인에 중심 논문의 참고문헌이 없어 원문 참고문헌 '+str(len(refs))+'개 중 로봇·행동·정책·확산 관련 제목을 우선한 12개를 대조했습니다. '+str(len(works))+'개 제목이 일치했습니다. 제목만 일치한 항목은 판본이 확인되지 않았으며, 중심 논문의 직접 인용은 원문 참고문헌에 근거합니다.'
     return works,[notice]
 
-def graph(seed,refresh=False):
+def _graph(seed,refresh=False):
     seed=wid(seed);path=cache_path(seed)
     if path.exists() and not refresh:return json.loads(path.read_text())
+    previous=json.loads(path.read_text()) if path.exists() else None
     center=node(request('works/'+seed));notices=[];works=[];citing=[]
+    mark_progress(seed,1,'참고문헌 확인')
     if not center['references']:
         works,notices=original_references(center)
+    mark_progress(seed,2,'관련 논문 수집')
     selected=list(dict.fromkeys(center['references'][:25]+center['related'][:12]));selected=[x for x in selected if x!=seed]
     if selected:
         try:works.extend([node(w) for w in request('works',filter='openalex_id:'+'|'.join(selected),per_page=50,select=FIELDS).get('results',[])])
         except Exception as error:notices.append('참고문헌·관련 논문 조회 실패: '+str(error))
-    try:citing=[node(w) for w in request('works',filter='cites:'+seed,sort='cited_by_count:desc',per_page=25,select=FIELDS).get('results',[])]
+    mark_progress(seed,3,'최신 후속 인용 확인')
+    incoming_ok=False
+    try:
+        citing=[node(w) for w in request('works',filter='cites:'+seed,sort='publication_date:desc',per_page=25,select=FIELDS).get('results',[])]
+        incoming_ok=True
     except Exception as error:notices.append('후속 인용 논문 조회 실패: '+str(error))
-    result=assemble(center,works,citing,notices);tmp=path.with_suffix('.'+uuid.uuid4().hex+'.tmp');tmp.write_text(json.dumps(result,ensure_ascii=False));tmp.replace(path);return result
+    mark_progress(seed,4,'인용 관계·유사도 계산')
+    result=assemble(center,works,citing,notices)
+    old_ids={n['id'] for n in (previous or {}).get('nodes',[])}
+    result['updates']={'previous_retrieved':(previous or {}).get('retrieved'),'new_ids':[n['id'] for n in result['nodes'] if previous and n['id'] not in old_ids],'incoming_status':'ready' if incoming_ok else 'error','incoming_sort':'publication_date:desc'}
+    tmp=path.with_suffix('.'+uuid.uuid4().hex+'.tmp');tmp.write_text(json.dumps(result,ensure_ascii=False));tmp.replace(path);return result
 
 def import_work(seed,target):
     data=graph(seed);work=next((w for w in data['nodes'] if w['id']==wid(target)),None)

@@ -73,11 +73,12 @@ def catalog(params):
         if (params.get('scope')=='candidate')!=(p['status']=='candidate'):continue
         papers.append(p)
     facets={k:sorted({x for p in papers for x in (p[k] if isinstance(p[k],list) else [p[k]]) if x}) for k in ('collections','concepts','year')}
+    collection_counts={name:sum(name in p['collections'] for p in papers) for name in facets['collections']}
     def matches(p):
-        return (not q or q in ' '.join([p['title'],*p['authors'],*p['concepts'],*p['collections']]).casefold()) and all(not params.get(k) or params[k] in p[field] for k,field in [('collection','collections'),('concept','concepts')]) and (not params.get('year') or p['year']==params['year']) and (not params.get('status') or p['status']==params['status'])
+        return (not q or q in ' '.join([p['title'],*p['authors'],*p['concepts'],*p['collections']]).casefold()) and all(not params.get(k) or params[k] in p[field] for k,field in [('collection','collections'),('concept','concepts')]) and (not params.get('year') or str(p['year'])==str(params['year'])) and (not params.get('status') or p['status']==params['status'])
     papers=[p for p in papers if matches(p)];sort=params.get('sort','updated')
     papers.sort(key=lambda p:str(p.get(sort) or '').casefold(),reverse=sort!='title')
-    return {'total':len(papers),'offset':offset,'items':papers[offset:offset+limit],'facets':facets}
+    return {'total':len(papers),'offset':offset,'items':papers[offset:offset+limit],'facets':facets,'collection_counts':collection_counts}
 
 def people(pid):
     p=R.get(pid);report=(p.get('reports') or [{}])[-1];evidence=report.get('discovery',{}).get('affiliations',[]);items=[]
