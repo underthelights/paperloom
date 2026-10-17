@@ -48,7 +48,15 @@ def assemble(seed,works,citing,notices):
 def original_references(center):
     paper=next((p for p in R.all_records() if p.get('references') and R.norm(p['title'])==R.norm(center['title'])),None)
     if not paper:return [],[]
-    refs=paper['references'];ranked=sorted(enumerate(refs),key=lambda pair:(not any(k in pair[1]['title'].lower() for k in ('robot','action','policy','diffusion')),pair[0]))[:12]
+    refs=paper['references']
+    run=paper.get('last_run','')
+    if re.fullmatch(r'[a-f0-9]{32}',run):
+        original=R.DATA/'runs'/run/'paper.html'
+        if original.is_file():
+            from bs4 import BeautifulSoup
+            parsed=R.bibliography(BeautifulSoup(original.read_text(),'html.parser'),paper['arxiv'])
+            if parsed:refs=parsed
+    ranked=sorted(enumerate(refs),key=lambda pair:(not any(k in pair[1]['title'].lower() for k in ('robot','action','policy','diffusion')),pair[0]))[:12]
     works=[];matches=[]
     for _,ref in ranked:
         try:

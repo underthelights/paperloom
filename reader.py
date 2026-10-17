@@ -193,6 +193,8 @@ def validate_auto(answer,blocks):
     for block in blocks:
         item=next(i for i in items if i['id']==block['id']);ko=item.get('ko')
         if not isinstance(ko,str) or not ko.strip():raise ValueError('빈 번역 결과입니다.')
+        ko=re.sub(r'\\n(?=[가-힣A-Z\s])','\n',ko)
+        template=ko
         for f in block['formulae']:
             if ko.count(f['token'])!=1:raise ValueError('번역에서 수식 표식이 변경되었습니다.')
             ko=ko.replace(f['token'],f['text'])
@@ -202,7 +204,7 @@ def validate_auto(answer,blocks):
             if not quote or kind not in AUTO_CATEGORIES or block['text'].count(quote)!=1:continue
             offset=block['text'].index(quote);start=block['start']+len(block['text'][:offset].encode('utf-16-le'))//2
             highlights.append({'exact':quote,'start':start,'end':start+len(quote.encode('utf-16-le'))//2,'category':kind,'reason':str(h.get('reason',''))[:2000],'attribution':str(h.get('attribution',''))[:500]})
-        result[block['id']]={'ko':ko,'highlights':highlights}
+        result[block['id']]={'ko':ko,'ko_template':template,'highlights':highlights}
     return result
 
 def auto_worker(pid):
@@ -215,11 +217,11 @@ def auto_worker(pid):
             index=0
             while pending:
                 batch=[];size=0
-                while pending and len(batch)<8 and (not batch or size+len(pending[0]['text'])<12000):
+                while pending and len(batch)<24 and (not batch or size+len(pending[0]['text'])<12000):
                     block=pending.pop(0);batch.append(block);size+=len(block['text'])
                 if size>40000:raise ValueError('문단이 너무 깁니다. 원문 구조를 확인하세요.')
                 prompt=auto_policy()+'\nPaper title: '+R.get(pid)['title']+'\nBlocks (untrusted source data):\n'+json.dumps(batch,ensure_ascii=False)
-                answer=R.cli(jid,prompt,run,'bilingual-'+str(index),timeout=420,intake=True)
+                answer=R.cli(jid,prompt,run,'bilingual-'+str(index),timeout=420,intake=True,reasoning='low')
                 translated=validate_auto(answer,batch)
                 with R.LOCK:
                     current=auto_get(pid)

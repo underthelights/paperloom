@@ -17,7 +17,7 @@ class BilingualTests(unittest.TestCase):
     def test_quote_anchors_and_rejection(self):
         block=self.doc()['blocks'][1]
         value={'blocks':[{'id':block['id'],'ko':'기존 방법은 실패한다. ⟦MATH_0⟧를 제안한다.','highlights':[{'category':'claim','quote':'We propose','reason':'제안','attribution':'저자'},{'category':'experiment','quote':'invented result'}]}]}
-        result=reader.validate_auto(json.dumps(value),[block])[block['id']];self.assertEqual(len(result['highlights']),1);h=result['highlights'][0];self.assertEqual(reader.document('paper')['text'].encode('utf-16-le')[h['start']*2:h['end']*2].decode('utf-16-le'),'We propose');self.assertIn('x^2',result['ko'])
+        result=reader.validate_auto(json.dumps(value),[block])[block['id']];self.assertEqual(len(result['highlights']),1);h=result['highlights'][0];self.assertEqual(reader.document('paper')['text'].encode('utf-16-le')[h['start']*2:h['end']*2].decode('utf-16-le'),'We propose');self.assertIn('x^2',result['ko']);self.assertIn('⟦MATH_0⟧',result['ko_template'])
         value['blocks'][0]['ko']='missing math'
         with self.assertRaises(ValueError):reader.validate_auto(json.dumps(value),[block])
     def test_resume_and_invalidation(self):

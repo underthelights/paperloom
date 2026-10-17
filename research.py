@@ -195,6 +195,16 @@ def cancel(jid):
 def shutdown():
     for jid in list(JOBS): cancel(jid)
 
+def bibliography(article,aid):
+    refs=[]
+    for b in article.select('.ltx_bibitem'):
+        title=b.select_one('.ltx_bib_title');blocks=b.select('.ltx_bibblock')
+        if title is None and len(blocks)>=2:title=blocks[1]
+        refs.append({'id':b.get('id',''),'title':title.get_text(' ',strip=True).strip('. ') if title else b.get_text(' ',strip=True)[:220],
+                     'citation':b.get_text(' ',strip=True),'source':'https://arxiv.org/html/'+aid+'#'+b.get('id',''),
+                     'urls':[urljoin('https://arxiv.org/html/'+aid,a['href']) for a in b.select('a[href]') if a['href'].startswith(('https://','http://'))]})
+    return refs
+
 def collect(p,run):
     aid=p['arxiv']; sources=[]; refs=[];html='';text=''
     try:
@@ -203,11 +213,7 @@ def collect(p,run):
         if not article: raise ValueError('HTML 본문이 없습니다.')
         for math in article.select('math'):
             if math.get('alttext'): math.replace_with(' $'+math['alttext']+'$ ')
-        for b in article.select('.ltx_bibitem'):
-            title=b.select_one('.ltx_bib_title')
-            refs.append({'id':b.get('id',''),'title':title.get_text(' ',strip=True).strip('. ') if title else b.get_text(' ',strip=True)[:220],
-                         'citation':b.get_text(' ',strip=True),'source':'https://arxiv.org/html/'+aid+'#'+b.get('id',''),
-                         'urls':[urljoin('https://arxiv.org/html/'+aid,a['href']) for a in b.select('a[href]') if a['href'].startswith(('https://','http://'))]})
+        refs=bibliography(article,aid)
         text=article.get_text('\n',strip=True)
         (run/'paper.html').write_text(html)
         sources.append({'kind':'paper','url':'https://arxiv.org/html/'+aid,'retrieved':now(),'sha256':hashlib.sha256(html.encode()).hexdigest()})
@@ -258,7 +264,7 @@ def collect_figures(aid,run):
         except Exception: continue
     return figures
 
-def cli(jid,prompt,run,name,timeout=900,intake=False):
+def cli(jid,prompt,run,name,timeout=900,intake=False,reasoning="medium"):
     executable=desktop_ai.codex_path()
     if not executable: raise ValueError('Codex CLI 설치와 로그인이 필요합니다.')
     output=run/(name+'.txt')
@@ -266,7 +272,8 @@ def cli(jid,prompt,run,name,timeout=900,intake=False):
          '-c','web_search="live"','-c','model_reasoning_effort="high"','--json','--output-last-message',str(output),'-C',str(run),'-']
     if intake:
         cmd[-1:-1]=['--disable','shell_tool']
-        cmd[cmd.index('model_reasoning_effort="high"')]='model_reasoning_effort="medium"'
+        if reasoning not in ('low','medium','high'):raise ValueError('Invalid reasoning effort')
+        cmd[cmd.index('model_reasoning_effort="high"')]='model_reasoning_effort="'+reasoning+'"'
     env=os.environ.copy();env['PATH']='/opt/homebrew/bin:/usr/local/bin:'+env.get('PATH','')
     (run/(name+'-prompt.txt')).write_text(prompt)
     with (run/(name+'-events.jsonl')).open('w') as stdout, (run/(name+'-stderr.txt')).open('w') as stderr:
