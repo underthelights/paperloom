@@ -34,11 +34,11 @@ def create(name,pid=None,annotation_id=None):
     name=str(name).strip()
     if not name or len(name)>120:raise ValueError('개념 이름은 1–120자입니다.')
     if pid:R.get(pid)
-    if annotation_id:
-        a=reader.get(annotation_id)
-        if a['paper_id']!=pid:raise ValueError('하이라이트의 논문이 일치하지 않습니다.')
     ident=hashlib.sha256(R.norm(name).encode()).hexdigest()[:32]
     with R.LOCK:
+        if annotation_id:
+            a=reader.get(annotation_id)
+            if a['paper_id']!=pid:raise ValueError('하이라이트의 논문이 일치하지 않습니다.')
         try:v=get(ident)
         except ValueError:v={'id':ident,'kind':'concept','name':name,'papers':[],'annotations':[],'notes':'','markdown':'','status':'draft','video_status':'idle'}
         if pid and pid not in v['papers']:v['papers'].append(pid)

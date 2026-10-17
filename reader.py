@@ -92,7 +92,15 @@ def delete(aid):
     with R.LOCK:
         a=get(aid)
         if a.get('status')=='running':raise ValueError('설명이 완료된 뒤 삭제하세요.')
-        with R.db() as c:c.execute('DELETE FROM annotations WHERE id=?',(aid,))
+        with R.db() as c:
+            c.execute('DELETE FROM annotations WHERE id=?',(aid,))
+            if c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='knowledge'").fetchone():
+                for row in c.execute("SELECT id,body FROM knowledge WHERE kind='concept'").fetchall():
+                    notebook=json.loads(row['body'])
+                    if aid not in notebook.get('annotations',[]):continue
+                    notebook['annotations']=[value for value in notebook['annotations'] if value!=aid]
+                    notebook['updated']=R.now()
+                    c.execute('UPDATE knowledge SET body=? WHERE id=?',(json.dumps(notebook,ensure_ascii=False),row['id']))
     return {'deleted':True}
 
 def explain(aid,mode,question=""):
