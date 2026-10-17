@@ -1,0 +1,13 @@
+{
+  "eli5": {
+    "url": "https://github.com/DreambigOu/ELI5",
+    "commit": "a766623b062331fdde53467001379b4ddf3acc2f",
+    "license": "MIT",
+    "adaptation": "Preserve factual accuracy; adult researcher audience; Korean output."
+  },
+  "survey": {
+    "source": "iCloud Obsidian / Research_Survey_Pipeline_v1",
+    "captured": "2026-10-17",
+    "mode": "single-paper analysis with code guide; not a completed topic-wide survey"
+  }
+}

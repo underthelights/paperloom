@@ -1,0 +1,68 @@
+{
+  "name": "paperloom",
+  "version": "2.1.0",
+  "description": "Evidence-first paper research workspace",
+  "main": "desktop/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "build:backend": "python scripts/build_backend.py",
+    "pack": "electron-builder --dir",
+    "dist:mac": "electron-builder --mac zip",
+    "dist:win": "electron-builder --win nsis",
+    "build:reader": "frontend-src/node_modules/.bin/esbuild frontend-src/reader-entry.js --bundle --minify --format=iife --outfile=static/reader-vendor.js",
+    "test": "python3 -m unittest discover -s tests -p \"test_*.py\""
+  },
+  "keywords": [],
+  "author": "Paperloom",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "electron": "44.9.0",
+    "electron-builder": "26.15.3",
+    "pdfjs-dist": "6.4.299",
+    "playwright": "1.64.1"
+  },
+  "private": true,
+  "build": {
+    "appId": "local.paperloom.desktop",
+    "productName": "Paperloom",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "desktop/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "build/backend-dist/paperloom-server",
+        "to": "backend"
+      },
+      {
+        "from": "build/seed",
+        "to": "seed"
+      },
+      {
+        "from": "build/research-seed-runs-public",
+        "to": "research-seed-runs"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "identity": null,
+      "target": [
+        "zip"
+      ],
+      "icon": "desktop/assets/icon.icns"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/underthelights/paperloom.git"
+  }
+}
