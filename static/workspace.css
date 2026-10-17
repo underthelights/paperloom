@@ -1,0 +1,17 @@
+/* Workspace hierarchy; navigation state is independent of layout modes. */
+:root{--muted:#5d655e;--line:#d0d6cd}
+html[data-theme=dark]{--muted:#afbbb2;--line:#465249}
+.library{padding-top:22px}.brand{margin-bottom:24px}.brand small{font-size:9px}
+.workspace-nav{display:flex;flex-direction:column;gap:4px;margin-bottom:16px}
+.nav-heading{font-size:11px;font-weight:650;letter-spacing:.05em;color:var(--muted);padding:0 12px 8px}
+body .workspace-nav .home-button{display:flex;align-items:center;gap:12px;margin:0;padding:12px 10px;text-align:left;border:1px solid transparent;border-left:3px solid transparent;background:transparent;color:var(--ink);min-height:64px;border-radius:7px}
+.workspace-nav strong{font-size:14px;font-weight:600;display:block}.workspace-nav small{display:block;font-size:11px;line-height:1.5;color:var(--muted);margin-top:4px}.nav-number{font-size:11px;font-variant-numeric:tabular-nums;color:var(--muted)}
+body .workspace-nav .home-button:hover{background:var(--surface)}
+body .workspace-nav .home-button[aria-current=page]{background:var(--accent-wash);color:var(--accent);border-left-color:var(--accent)}
+body .workspace-nav .home-button[aria-current=page] strong{font-weight:750}
+#paper-header h1,.empty h2,.prose h2{font-family:inherit;font-weight:650;letter-spacing:-.025em}
+#paper-header h1{font-size:28px;line-height:1.4}.caption,.notice{font-size:12px}.eyebrow{font-size:11px}.paper-row strong{font-size:13px}.paper-row small{font-size:11px}.search input{font-size:13px}.library-tabs button{font-size:13px}.list-heading{font-size:10px}
+#tabs{overflow-x:auto;gap:22px}#tabs button{white-space:nowrap;min-height:44px}
+.concept-map{border:1px solid var(--line);border-radius:10px;padding:16px;background:var(--bg);margin:22px 0}.concept-map summary{font-size:13px;font-weight:600;cursor:pointer}.concept-map svg{display:block;max-height:360px}
+.catalog-card{border-radius:10px}.catalog-title{font-size:16px;line-height:1.5}.catalog-card p{font-size:12px}
+@media(max-height:800px){.library{padding-top:16px}.brand{margin-bottom:16px}.workspace-nav .home-button{min-height:56px!important;padding-top:8px!important;padding-bottom:8px!important}.workspace-nav{margin-bottom:10px}}

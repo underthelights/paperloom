@@ -1,4 +1,5 @@
 'use strict';
+function setWorkspaceNav(id){document.querySelectorAll('.workspace-nav button').forEach(b=>{if(b.id===id)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current')})}
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
 let selectionRequest=0;
 let state, paper, filter='papers', tab='brief', quote='', chatJob=null, noteTimer, activeId=localStorage.getItem('research.active'), pdfDoc=null, pdfPage=1, renderEpoch=0;
@@ -22,6 +23,7 @@ function renderList(){
  $('#paper-list').innerHTML=list.slice(0,60).map(p=>`<button class="paper-row ${p.id===activeId?'active':''}" data-paper="${p.id}"><strong>${escape(p.title)}</strong><small>${escape(p.category||p.year||'연도 미확인')} <span>·</span> <span class="state">${labels[p.status]||'분석 대기'}</span></small></button>`).join('')||'<div class="caption" style="padding:15px">'+(q?'검색 결과가 없습니다.':'arXiv 논문을 추가하거나 후보에서 원문을 선택하세요.')+'</div>';
 }
 async function select(id){
+ setWorkspaceNav('catalog');
  document.body.classList.remove('home-mode','discovery-mode','reading-mode','knowledge-mode');window.inboxHome=false;$('#tabs').hidden=false;
  const request=++selectionRequest;const next=await api('research/paper/'+id);if(request!==selectionRequest)return;paper=next;activeId=id;localStorage.setItem('research.active',id);pdfDoc=null;pdfPage=1;quote='';$('#quote-chip').hidden=true;renderList();renderHeader();renderContent();renderChat();renderProgress();$('#notes').value=paper.notes||'';$('#note-status').textContent='자동 저장';
 }

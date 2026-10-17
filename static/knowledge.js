@@ -1,6 +1,7 @@
 'use strict';
 let knowledgeView='',knowledgePoll=null,knowledgeEpoch=0;
 function knowledgeShell(title,subtitle){
+ setWorkspaceNav(title==='라이브러리 서가'?'catalog':'notebooks');
  ++selectionRequest;renderEpoch++;knowledgeEpoch++;window.inboxHome=false;document.body.classList.remove('home-mode','reading-mode');document.body.classList.add('discovery-mode','knowledge-mode');$('#catalog').classList.toggle('knowledge-nav-selected',title==='라이브러리 서가');$('#notebooks').classList.toggle('knowledge-nav-selected',title==='개념 노트북');$('#content').scrollTop=0;$('#tabs').hidden=true;$('#progress').hidden=true;$('#crumb').textContent=title;$('#paper-header').innerHTML=`<div class="eyebrow">PERSONAL RESEARCH LIBRARY</div><h1>${escape(title)}</h1><p class="caption">${escape(subtitle)}</p>`;$('#export').disabled=true;
 }
 $('#catalog').onclick=()=>openCatalog();$('#notebooks').onclick=()=>{knowledgeShell('개념 노트북','여러 논문의 같은 개념을 하나의 노트북에서 비교하고 전개합니다.');renderNotebooks()};
@@ -46,7 +47,7 @@ async function renderPeople(){
 document.addEventListener('click',e=>{if(e.target.closest('#home,#discover,[data-tab],[data-paper]')){knowledgeEpoch++;knowledgeView='';document.body.classList.remove('knowledge-mode');$$('.knowledge-nav-selected').forEach(b=>b.classList.remove('knowledge-nav-selected'));clearInterval(knowledgePoll)}},true);
 
 function conceptMap(items){
- const nodes=items.slice(0,16);if(!nodes.length)return '';const points=nodes.map((v,i)=>({v,x:360+260*Math.cos(2*Math.PI*i/nodes.length),y:195+145*Math.sin(2*Math.PI*i/nodes.length)}));let edges='';
+ const nodes=items.slice(0,16);if(nodes.length<2)return '<p class="notice">개념 지도는 두 개 이상의 개념을 연결하면 표시됩니다. 먼저 노트북에 논문이나 하이라이트를 연결하세요.</p>';const points=nodes.map((v,i)=>({v,x:360+260*Math.cos(2*Math.PI*i/nodes.length),y:195+145*Math.sin(2*Math.PI*i/nodes.length)}));let edges='';
  for(let i=0;i<points.length;i++)for(let j=i+1;j<points.length;j++){const a=points[i],b=points[j],shared=a.v.papers.filter(id=>b.v.papers.includes(id));if(shared.length)edges+=`<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="var(--accent)" stroke-opacity=".4" stroke-width="${Math.min(6,shared.length+1)}"><title>공통 연결 논문 ${shared.length}개</title></line>`}
- return `<details class="concept-map" open><summary>개념 관계 지도 · 선은 같은 논문에 연결된 개념을 표시합니다${items.length>16?' · 첫 16개 표시':''}</summary><svg viewBox="0 0 720 390" role="img" aria-label="공통 논문으로 연결한 개념 지도">${edges}${points.map(({v,x,y})=>`<g data-concept="${v.id}" role="button" tabindex="0" aria-label="${escape(v.name)}"><circle cx="${x}" cy="${y}" r="${12+Math.min(12,v.papers.length*2)}" fill="var(--accent)"/><text x="${x}" y="${y+36}" text-anchor="middle" fill="var(--ink)" font-size="12">${escape(v.name.length>28?v.name.slice(0,26)+'…':v.name)}</text><title>${escape(v.name)} · 논문 ${v.papers.length}</title></g>`).join('')}</svg></details>`;
+ return `<details class="concept-map" ${edges?'open':''}><summary>개념 관계 지도 · 선은 같은 논문에 연결된 개념을 표시합니다${items.length>16?' · 첫 16개 표시':''}</summary><svg viewBox="0 0 720 390" role="img" aria-label="공통 논문으로 연결한 개념 지도">${edges}${points.map(({v,x,y})=>`<g data-concept="${v.id}" role="button" tabindex="0" aria-label="${escape(v.name)}"><circle cx="${x}" cy="${y}" r="${12+Math.min(12,v.papers.length*2)}" fill="var(--accent)"/><text x="${x}" y="${y+36}" text-anchor="middle" fill="var(--ink)" font-size="12">${escape(v.name.length>28?v.name.slice(0,26)+'…':v.name)}</text><title>${escape(v.name)} · 논문 ${v.papers.length}</title></g>`).join('')}</svg></details>`;
 }
