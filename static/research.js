@@ -16,11 +16,11 @@ function setTheme(){document.documentElement.dataset.theme=theme==='system'?(mat
 setTheme();matchMedia('(prefers-color-scheme: dark)').addEventListener('change',setTheme);$('#theme').onclick=()=>{theme={system:'light',light:'dark',dark:'system'}[theme];setTheme();toast($('#theme').title)};
 async function refresh(){state=await api('research');renderList();renderProgress()}
 function renderList(){
- $('#paper-count').textContent=state.counts.papers;$('#candidate-count').textContent=state.counts.candidates;$('#brief-count').textContent=state.counts.briefs+' BRIEFS';
- $('#sync-label').textContent='MCP 가져옴 · '+(state.notion.captured||'').slice(0,10);$('#list-label').textContent=filter==='papers'?'MY PAPERS':'NOTION · 확인할 후보';
- const q=$('#search').value.toLowerCase();const list=state.papers.filter(p=>(filter==='candidate'?p.status==='candidate':p.status!=='candidate')&&((p.title+' '+(p.authors||[]).join(' ')).toLowerCase().includes(q)));
- $('#list-label').textContent+=' · '+list.length+'개'+(list.length>60?' (60개 표시 · 서가에서 전체 탐색)':'');
- $('#paper-list').innerHTML=list.slice(0,60).map(p=>`<button class="paper-row ${p.id===activeId?'active':''}" data-paper="${p.id}"><strong>${escape(p.title)}</strong><small>${escape(p.category||p.year||'연도 미확인')} <span>·</span> <span class="state">${labels[p.status]||'분석 대기'}</span></small></button>`).join('')||'<div class="caption" style="padding:15px">'+(q?'검색 결과가 없습니다.':'arXiv 논문을 추가하거나 후보에서 원문을 선택하세요.')+'</div>';
+ $('#sync-label').textContent='개인 연구 라이브러리';
+ const q=$('#search').value.trim().toLowerCase();const list=state.papers.filter(p=>p.status!=='candidate'&&((p.title+' '+(p.authors||[]).join(' ')).toLowerCase().includes(q))).sort((a,b)=>String(b.updated||'').localeCompare(String(a.updated||''))||a.id.localeCompare(b.id));
+ $('#list-label').textContent=q?'검색 결과':'최근 작업';
+ $('#paper-list').innerHTML=list.slice(0,5).map(p=>`<button class="paper-row ${p.id===activeId?'active':''}" data-paper="${p.id}"><strong>${escape(p.title)}</strong><small>${escape(p.year||'연도 미확인')} · ${escape(labels[p.status]||'분석 대기')}</small></button>`).join('')||'<div class="caption" style="padding:15px">'+(q?'일치하는 논문이 없습니다.':'새로 발견한 논문을 수집함에 넣으세요. 최근 작업만 여기에 표시됩니다.')+'</div>';
+
 }
 async function select(id){
  setWorkspaceNav('catalog');
@@ -74,7 +74,7 @@ $('#add').onclick=()=>openImport();$$('[data-close]').forEach(b=>b.onclick=()=>$
 $('#import-form').onsubmit=async e=>{e.preventDefault();const value=$('#paper-input').value.trim();const b=$('#import-submit');b.disabled=true;try{if(/^(?:https?:\/\/arxiv\.org\/(?:abs|pdf|html)\/)?(?:\d{4}\.\d{4,5}|[a-z-]+(?:\.[A-Z]{2})?\/\d{7})(?:v\d+)?(?:\.pdf)?$/.test(value)){await addPaper(value)}else{b.textContent='원문 검색 중…';const list=await api('research/search',{query:value});$('#search-results').innerHTML=list.length?'<p>제목·저자·연도를 확인하고 선택하면 분석을 시작합니다.</p>'+list.map(p=>`<button type="button" class="result" data-arxiv="${escape(p.arxiv)}">${escape(p.title)}<small>${escape(p.year)} · ${escape(p.authors.join(', '))}</small></button>`).join(''):'<p>정확히 일치하는 원문을 찾지 못했습니다. arXiv 링크를 직접 입력하세요.</p>';}}catch(e){toast(e.message)}finally{b.disabled=false;b.textContent='추가 및 분석'}};
 async function addPaper(value){const result=await api('research/add',{value});$('#import-dialog').close();filter='papers';$$('[data-filter]').forEach(b=>b.classList.toggle('selected',b.dataset.filter===filter));await refresh();await select(result.paper.id)}
 $('#search-results').onclick=async e=>{const b=e.target.closest('[data-arxiv]');if(!b)return;b.disabled=true;try{await addPaper(b.dataset.arxiv)}catch(e){toast(e.message);b.disabled=false}};
-$('#search').oninput=renderList;$('#paper-list').onclick=e=>{const b=e.target.closest('[data-paper]');if(b)select(b.dataset.paper).catch(e=>toast(e.message))};
+$('#all-papers').onclick=()=>openCatalog({q:$('#search').value});$('#search').oninput=renderList;$('#paper-list').onclick=e=>{const b=e.target.closest('[data-paper]');if(b)select(b.dataset.paper).catch(e=>toast(e.message))};
 $$('[data-filter]').forEach(b=>b.onclick=()=>{filter=b.dataset.filter;$$('[data-filter]').forEach(x=>x.classList.toggle('selected',x===b));renderList()});
 $$('[data-tab]').forEach(b=>b.onclick=()=>{tab=b.dataset.tab;$$('[data-tab]').forEach(x=>x.classList.toggle('selected',x===b));renderContent()});
 $$('[data-side]').forEach(b=>b.onclick=()=>{$$('[data-side]').forEach(x=>x.classList.toggle('selected',x===b));$('#chat-pane').hidden=b.dataset.side!=='chat';$('#notes-pane').hidden=b.dataset.side!=='notes'});

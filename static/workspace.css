@@ -15,3 +15,5 @@ body .workspace-nav .home-button[aria-current=page] strong{font-weight:750}
 .concept-map{border:1px solid var(--line);border-radius:10px;padding:16px;background:var(--bg);margin:22px 0}.concept-map summary{font-size:13px;font-weight:600;cursor:pointer}.concept-map svg{display:block;max-height:360px}
 .catalog-card{border-radius:10px}.catalog-title{font-size:16px;line-height:1.5}.catalog-card p{font-size:12px}
 @media(max-height:800px){.library{padding-top:16px}.brand{margin-bottom:16px}.workspace-nav .home-button{min-height:56px!important;padding-top:8px!important;padding-bottom:8px!important}.workspace-nav{margin-bottom:10px}}
+
+.list-heading{align-items:center;padding:14px 8px 8px;letter-spacing:0;font-size:12px;font-weight:600;gap:6px}.list-heading button{font-size:11px;color:var(--accent);padding:5px 0;font-weight:500}.paper-row strong{-webkit-line-clamp:2}.paper-row{padding:10px;margin-bottom:4px}.search{margin-bottom:4px}
