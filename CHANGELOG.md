@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.1.1
+
+- Remove deleted highlight references from concept notebooks atomically while preserving notes.
+- Wait for deferred UI handlers before exercising packaged startup navigation.
+
 ## 2.1.0
 
 - Publish the local Electron research workspace with an empty public library.
