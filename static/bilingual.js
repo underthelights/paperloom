@@ -10,7 +10,8 @@ async function startBilingual(pid,epoch){
  $$('[data-auto-category]').forEach(b=>b.onchange=()=>{b.checked?autoEnabled.add(b.dataset.autoCategory):autoEnabled.delete(b.dataset.autoCategory);paintAuto()});
  const current=()=>paper?.id===pid&&renderEpoch===epoch&&!!$('#bilingual-controls');
  async function poll(){try{const v=await api('reader/auto/'+pid);if(!current())return;show(v);if(v.status==='running')bilingualTimer=setTimeout(poll,2500)}catch(e){if(current())$('#bilingual-status').textContent='번역 상태 확인 실패: '+e.message}}
- function show(v){bilingualValue=v;applyBilingual();$('#bilingual-status').textContent=`AI 번역·분류 ${Object.keys(v.blocks).length}/${v.total} 문단 · ${({running:'처리 중',ready:'완료',error:'중단',idle:'대기'})[v.status]}${v.error?' · '+v.error:''} · 원문과 대조하세요`;$('#bilingual-retry').hidden=v.status!=='error'}
+ let positionRestored=false;
+ function show(v){bilingualValue=v;applyBilingual();if(!positionRestored){positionRestored=true;requestAnimationFrame(()=>{if(current())$('#content').scrollTop=openPapers.find(p=>p.id===pid)?.scroll||0})}$('#bilingual-status').textContent=`AI 번역·분류 ${Object.keys(v.blocks).length}/${v.total} 문단 · ${({running:'처리 중',ready:'완료',error:'중단',idle:'대기'})[v.status]}${v.error?' · '+v.error:''} · 원문과 대조하세요`;$('#bilingual-retry').hidden=v.status!=='error'}
  $('#bilingual-retry').onclick=async()=>{try{const v=await api('reader/auto',{paper_id:pid,retry:true});if(current()){show(v);bilingualTimer=setTimeout(poll,2500)}}catch(e){if(current())$('#bilingual-status').textContent=e.message}};
  try{const v=await api('reader/auto',{paper_id:pid});if(!current())return;show(v);if(v.status==='running')bilingualTimer=setTimeout(poll,2500)}catch(e){if(current())$('#bilingual-status').textContent='자동 번역 시작 실패: '+e.message}
 }
