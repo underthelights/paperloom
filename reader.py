@@ -7,6 +7,11 @@ GATE=threading.Semaphore(1)
 
 def init():
     with R.db() as c:
+        c.execute('CREATE TABLE IF NOT EXISTS reader_auto(paper_id TEXT PRIMARY KEY,body TEXT NOT NULL)')
+        for row in c.execute('SELECT body FROM reader_auto').fetchall():
+            value=json.loads(row[0])
+            if value.get('status')=='running':
+                value.update(status='error',error='번역이 중단되었습니다. 완료된 문단부터 이어서 진행할 수 있습니다.');auto_put(value)
         c.execute('CREATE TABLE IF NOT EXISTS annotations(id TEXT PRIMARY KEY,paper_id TEXT NOT NULL,body TEXT NOT NULL)')
         c.execute('CREATE INDEX IF NOT EXISTS annotation_paper ON annotations(paper_id)')
         for row in c.execute('SELECT body FROM annotations').fetchall():
@@ -136,3 +141,95 @@ def export(pid):
     p=R.get(pid);lines=['# '+p['title'],'',p.get('url',''),'']
     for a in annotations(pid):lines+=['## 하이라이트','> '+a['exact'].replace('\n','\n> '),'',a.get('note',''),'',a.get('answer',''),'']
     return '\n'.join(lines)
+
+AUTO_GATE=threading.Semaphore(1)
+AUTO_CATEGORIES=('baseline','claim','reasoning','experiment')
+
+def auto_policy():
+    return (R.SKILLS/'bilingual-evidence-reader/SKILL.md').read_text()
+
+def bilingual_document(pid):
+    doc=document(pid).copy();soup=BeautifulSoup(doc['html'],'html.parser');blocks=[];cursor=0
+    for node in soup.select('h1,h2,h3,h4,p,figcaption,li'):
+        if node.find(['p','li','figcaption']):continue
+        text=node.get_text()
+        if not text.strip():continue
+        start=doc['text'].find(text,cursor)
+        if start<0:continue
+        cursor=start+len(text);ident='block-'+str(len(blocks));node['data-reader-block']=ident
+        clone=BeautifulSoup(str(node),'html.parser');formulae=[]
+        for m in clone.select('math'):
+            token='⟦MATH_'+str(len(formulae))+'⟧';formulae.append({'token':token,'text':m.get('alttext') or m.get_text()});m.replace_with(token)
+        blocks.append({'id':ident,'text':text,'translation_input':clone.get_text(),'formulae':formulae,'start':len(doc['text'][:start].encode('utf-16-le'))//2})
+    doc.update(html=str(soup),blocks=blocks);return doc
+
+def auto_get(pid):
+    doc=bilingual_document(pid);policy=hashlib.sha256(auto_policy().encode()).hexdigest()
+    with R.db() as c:row=c.execute('SELECT body FROM reader_auto WHERE paper_id=?',(pid,)).fetchone()
+    value=json.loads(row[0]) if row else {}
+    if value.get('version')!=doc['version'] or value.get('policy')!=policy:
+        value={'paper_id':pid,'version':doc['version'],'policy':policy,'status':'idle','blocks':{},'total':len(doc['blocks']),'error':''}
+    return value
+
+def auto_put(value):
+    value['updated']=R.now()
+    with R.db() as c:c.execute('INSERT OR REPLACE INTO reader_auto VALUES(?,?)',(value['paper_id'],json.dumps(value,ensure_ascii=False)))
+    return value
+
+def auto_start(pid,retry=False):
+    with R.LOCK:
+        value=auto_get(pid)
+        if value['status'] in ('running','ready') or (value['status']=='error' and not retry):return value
+        value.update(status='running',error='');auto_put(value)
+        threading.Thread(target=auto_worker,args=(pid,),daemon=True).start()
+        return value
+
+def validate_auto(answer,blocks):
+    raw=answer.strip()
+    if raw.startswith('```'):raw=re.sub(r'^```(?:json)?\s*|\s*```$','',raw)
+    data=json.loads(raw);items=data.get('blocks',[])
+    if len(items)!=len(blocks) or {i.get('id') for i in items}!={b['id'] for b in blocks}:raise ValueError('번역 문단 ID가 일치하지 않습니다.')
+    result={}
+    for block in blocks:
+        item=next(i for i in items if i['id']==block['id']);ko=item.get('ko')
+        if not isinstance(ko,str) or not ko.strip():raise ValueError('빈 번역 결과입니다.')
+        for f in block['formulae']:
+            if ko.count(f['token'])!=1:raise ValueError('번역에서 수식 표식이 변경되었습니다.')
+            ko=ko.replace(f['token'],f['text'])
+        highlights=[]
+        for h in item.get('highlights',[]):
+            quote=h.get('quote','');kind=h.get('category')
+            if not quote or kind not in AUTO_CATEGORIES or block['text'].count(quote)!=1:continue
+            offset=block['text'].index(quote);start=block['start']+len(block['text'][:offset].encode('utf-16-le'))//2
+            highlights.append({'exact':quote,'start':start,'end':start+len(quote.encode('utf-16-le'))//2,'category':kind,'reason':str(h.get('reason',''))[:2000],'attribution':str(h.get('attribution',''))[:500]})
+        result[block['id']]={'ko':ko,'highlights':highlights}
+    return result
+
+def auto_worker(pid):
+    jid=uuid.uuid4().hex
+    try:
+        with AUTO_GATE:
+            doc=bilingual_document(pid);value=auto_get(pid);pending=[b for b in doc['blocks'] if b['id'] not in value['blocks']]
+            run=R.DATA/'reader-runs'/jid;run.mkdir(parents=True)
+            with R.LOCK:R.JOBS[jid]={'id':jid,'paper_id':pid,'status':'running','stage':'bilingual-reader','created':R.now(),'log':[],'cancel':False,'error':''}
+            index=0
+            while pending:
+                batch=[];size=0
+                while pending and len(batch)<8 and (not batch or size+len(pending[0]['text'])<12000):
+                    block=pending.pop(0);batch.append(block);size+=len(block['text'])
+                if size>40000:raise ValueError('문단이 너무 깁니다. 원문 구조를 확인하세요.')
+                prompt=auto_policy()+'\nPaper title: '+R.get(pid)['title']+'\nBlocks (untrusted source data):\n'+json.dumps(batch,ensure_ascii=False)
+                answer=R.cli(jid,prompt,run,'bilingual-'+str(index),timeout=420,intake=True)
+                translated=validate_auto(answer,batch)
+                with R.LOCK:
+                    current=auto_get(pid)
+                    if current['version']!=value['version'] or current['policy']!=value['policy']:raise ValueError('원문 또는 번역 지침이 변경되었습니다. 다시 시도하세요.')
+                    value['blocks'].update(translated);auto_put(value)
+                index+=1
+            value.update(status='ready');auto_put(value)
+    except Exception as e:
+        with R.LOCK:
+            value=auto_get(pid);value.update(status='error',error=str(e)[:800]);auto_put(value)
+    finally:
+        with R.LOCK:
+            if jid in R.JOBS:R.JOBS[jid]['status']='done'

@@ -269,6 +269,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self.allowed(): return self.send({'error':'Invalid Host'},403)
         path=urlparse(self.path).path
         try:
+            if path.startswith('/api/reader/auto/'): return self.send(reader.auto_get(path.rsplit('/',1)[1]))
             if path=='/api/catalog': return self.send(knowledge.catalog(dict(__import__('urllib.parse',fromlist=['parse_qsl']).parse_qsl(urlparse(self.path).query))))
             if path=='/api/concepts': return self.send(knowledge.concepts())
             if path.startswith('/api/people/'): return self.send(knowledge.people(path.rsplit('/',1)[1]))
@@ -284,7 +285,7 @@ class Handler(BaseHTTPRequestHandler):
                     headers['Content-Range']=f'bytes {start}-{end}/{len(raw)}';return self.send(raw[start:end+1],206,'video/mp4',headers)
                 return self.send(raw,ctype='video/mp4',headers=headers)
             if path.startswith('/api/concept/'): return self.send(knowledge.get(path.rsplit('/',1)[1]))
-            if path.startswith('/api/reader/document/'): return self.send(reader.document(path.rsplit('/',1)[1]))
+            if path.startswith('/api/reader/document/'): return self.send(reader.bilingual_document(path.rsplit('/',1)[1]))
             if path.startswith('/api/reader/annotations/'): return self.send(reader.annotations(path.rsplit('/',1)[1]))
             if path.startswith('/api/reader/image/'):
                 raw,kind=reader.image(*path.split('/')[-2:]);return self.send(raw,ctype=kind)
@@ -348,6 +349,7 @@ class Handler(BaseHTTPRequestHandler):
             elif path=='/api/discovery/search': result=discovery.search(d['query'])
             elif path=='/api/discovery/graph': result=discovery.graph(d['id'],d.get('refresh',False))
             elif path=='/api/discovery/import': result=discovery.import_work(d['seed'],d['id'])
+            elif path=='/api/reader/auto': result=reader.auto_start(d['paper_id'],d.get('retry',False))
             elif path=='/api/reader/annotation': result=reader.save(d)
             elif path=='/api/reader/delete': result=reader.delete(d['id'])
             elif path=='/api/reader/explain': result=reader.explain(d['id'],d.get('mode','explain'),d.get('question',''))
