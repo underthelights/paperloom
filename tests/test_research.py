@@ -63,7 +63,7 @@ class ResearchTests(unittest.TestCase):
         final=research.get(p['id']);self.assertEqual(final['notes'],'written while analyzing');self.assertEqual(final['status'],'review');self.assertEqual(len(final['reports']),1);self.assertEqual(research.JOBS[jid]['status'],'done')
         research.JOBS.pop(jid)
 
-if __name__=='__main__': unittest.main()
+
 
     def test_public_install_without_personal_seed(self):
         (research.SKILLS/'notion-candidates.json').unlink()
