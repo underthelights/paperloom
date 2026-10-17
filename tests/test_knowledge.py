@@ -40,3 +40,14 @@ class KnowledgeTests(unittest.TestCase):
         self.assertEqual(K.people('1')['items'][0]['paper_affiliation'],'Verified institution')
         p['reports'][0]['discovery']['affiliations'].append({'author':'Ada Lovelace','paper_affiliation':'Other institution'});R.save(p)
         self.assertEqual(K.people('1')['items'][0]['paper_affiliation'],'확인 불가')
+
+    def test_deleting_highlight_detaches_all_notebooks_preserving_notes(self):
+        reader.put({'id':'linked','paper_id':'1','exact':'source quote'})
+        a=K.create('Ensemble','1','linked');b=K.create('Control','1','linked')
+        K.edit({'id':a['id'],'notes':'Keep the derivation'})
+        reader.delete('linked')
+        self.assertEqual(K.get(a['id'])['annotations'],[])
+        self.assertEqual(K.get(b['id'])['annotations'],[])
+        self.assertEqual(K.get(a['id'])['notes'],'Keep the derivation')
+        self.assertEqual(K.get(a['id'])['papers'],['1'])
+        with self.assertRaises(ValueError):K.create('Ensemble','1','linked')
