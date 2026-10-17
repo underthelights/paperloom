@@ -21,6 +21,17 @@ class ResearchTests(unittest.TestCase):
         with patch.object(research,'metadata',return_value={'title':'A paper','arxiv':'2303.04137v4','url':'https://arxiv.org/abs/2303.04137v4','authors':[]}):
             new=research.add('2303.04137v4');self.assertEqual(new['id'],p['id']);self.assertEqual(new['notes'],'my idea')
             again=research.add('2303.04137');self.assertEqual(again['id'],p['id']);self.assertEqual(len(research.all_records()),1)
+    def test_review_failure_preserves_unverified_draft_status(self):
+        with patch.object(research,'cli',side_effect=ValueError('timeout')):
+            result=research.review_draft('job',research.DATA)
+        self.assertEqual(result['verdict'],'needs_review')
+        self.assertFalse(result['completed'])
+        self.assertEqual(result['corrections'],[])
+        with patch.object(research,'cli',return_value='{"verdict":"pass","issues":[],"corrections":[null]}'):
+            self.assertEqual(research.review_draft('job',research.DATA)['verdict'],'needs_review')
+        with patch.object(research,'cli',side_effect=InterruptedError()):
+            with self.assertRaises(InterruptedError):research.review_draft('job',research.DATA)
+
     def test_candidate_cannot_run_analysis(self):
         research.import_candidates([{'Title':'Unknown'}]);p=research.all_records()[0]
         with self.assertRaisesRegex(ValueError,'원문'): research.start(p['id'])

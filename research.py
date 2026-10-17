@@ -370,7 +370,7 @@ Do not claim code was cloned unless code-status.json says so. Cite URLs in every
             if any(not isinstance(report[k],list) or any(not isinstance(x,dict) for x in report[k]) for k in ('sources','checks')): raise ValueError('출처/검수 구조가 잘못되었습니다.')
             mark(jid,'review','원문 대비 주장·수치·소속·코드 근거 검수')
             (run/'draft.json').write_text(json.dumps(report,ensure_ascii=False,indent=2))
-            review=parse_json(cli(jid,RESEARCH_RULES+'''\nReview draft.json against paper.txt, paper-pdf.txt, discovery.json and code-status.json; inspect code if present. Check numeric results/table settings, equations and symbol definitions, claims vs evidence, actual code snippets/commit anchors, affiliation vs lab, dates, and unknowns. Do not mark missing facts as verified. Return ONLY {"verdict":"pass|needs_review","issues":["specific issue"],"corrections":[{"section":"tldr|eli5|overview|method|experiments|code|labs|limitations","replacement":"complete corrected section Markdown"}]}. Apply all corrections you can support. No fabrication. Missing official code is a limitation, not a reason to invent code. This is single paper, not full survey completion.''',run,'review',timeout=600))
+            review=review_draft(jid,run)
             for fix in review.get('corrections',[]):
                 if fix.get('section') in needed[:-2] and isinstance(fix.get('replacement'),str): report[fix['section']]=fix['replacement']
             report.update(id=jid,created=now(),code_status=code,discovery=discovery,review=review,source_manifest=sources,scope='single-paper')
@@ -386,6 +386,17 @@ Do not claim code was cloned unless code-status.json says so. Cite URLs in every
         with LOCK: JOBS[jid].update(status='error',error=str(e)[:1200])
     finally:
         persist_job(jid)
+
+def review_draft(jid,run):
+    try:
+        value=parse_json(cli(jid,RESEARCH_RULES+'''\nReview draft.json against paper.txt, paper-pdf.txt, discovery.json and code-status.json; inspect code if present. Check numeric results/table settings, equations and symbol definitions, claims vs evidence, actual code snippets/commit anchors, affiliation vs lab, dates, and unknowns. Do not mark missing facts as verified. Return ONLY {"verdict":"pass|needs_review","issues":["specific issue"],"corrections":[{"section":"tldr|eli5|overview|method|experiments|code|labs|limitations","replacement":"complete corrected section Markdown"}]}. Apply all corrections you can support. No fabrication. Missing official code is a limitation, not a reason to invent code. This is single paper, not full survey completion.''',run,'review',timeout=600))
+        if not isinstance(value,dict) or value.get('verdict') not in ('pass','needs_review') or not isinstance(value.get('issues'),list) or not isinstance(value.get('corrections',[]),list):raise ValueError('검수 응답 형식 오류')
+        if any(not isinstance(f,dict) for f in value.get('corrections',[])):raise ValueError('검수 수정 형식 오류')
+        return value
+    except InterruptedError:
+        raise
+    except Exception as exc:
+        return {"verdict":"needs_review","issues":["자동 검수를 완료하지 못했습니다. 분석 초안을 보존했습니다: "+str(exc)[:600]],"corrections":[],"completed":False}
 
 def start(pid):
     p=get(pid)
