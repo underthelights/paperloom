@@ -69,7 +69,7 @@ def check_evidence(evidence,p,text):
     if not isinstance(evidence,list) or not 1<=len(evidence)<=5:raise ValueError('개념의 원문 근거가 없습니다.')
     for e in evidence:
         quote=e.get('quote')
-        if not isinstance(quote,str) or not 25<=len(quote)<=1200 or plain(quote) not in plain(text):raise ValueError('개념 인용 구절이 원문과 일치하지 않습니다.')
+        if not isinstance(quote,str) or not 25<=len(quote)<=1200 or ' '.join(quote.split()) not in ' '.join(text.split()):raise ValueError('개념 인용 구절이 원문과 일치하지 않습니다.')
         if e.get('url') not in allowed:raise ValueError('개념 근거는 현재 논문의 원문이어야 합니다.')
 
 def connections(payload,p,text):

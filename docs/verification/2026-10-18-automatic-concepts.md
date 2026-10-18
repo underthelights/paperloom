@@ -22,3 +22,5 @@ Quoted passages are checked against collected paper text. Code explanations are 
 Native application verification uses a local sanitized snapshot of these actual generated results, without personal notes, annotations or answers. The snapshot and screenshots are ignored work artifacts; no personal database or model logs are committed.
 
 The packaged Electron app opened the actual results, expanded source passages, followed graph/notebook links, and displayed generated explanations, the paper comparison,9 questions and per-paper backlinks without JavaScript errors. The full brief/tensor audit is tracked separately from this concept-stage verification.
+
+The canonical installed app was also tested with a separate temporary profile. Source quotations were additionally checked with case preserved; normalization changes whitespace only.

@@ -176,3 +176,7 @@ class ConceptPipelineTests(unittest.TestCase):
         with patch.object(P.threading,'Thread'):state=P.start(self.pid,retry=True)
         with patch.object(R,'cli') as cli:P.worker(self.pid,self.rid,state['token'])
         self.assertFalse(cli.called);self.assertEqual(P.load(self.pid)['status'],'ready')
+
+    def test_quotation_preserves_case_not_just_term_matching(self):
+        item=copy.deepcopy(self.item);item['evidence'][0]['quote']=item['evidence'][0]['quote'].upper()
+        with self.assertRaises(ValueError):P.validate({'concepts':[item]},self.paper,self.text)
