@@ -423,8 +423,11 @@ Do not claim code was cloned unless code-status.json says so. Cite URLs in every
             detail_guide=SKILLS/'tensor-evidence-analysis.md'
             if detail_guide.is_file():prompt+='\n'+detail_guide.read_text()
             prompt+='\nAdditional required JSON fields: related_work (Markdown), tensor_trace (Markdown), model_graph (object as specified in the guide). If unavailable, explain exactly why in the two Markdown fields and return an empty graph.'
+            walkthrough_guide=SKILLS/'paper-walkthrough.md'
+            if walkthrough_guide.is_file():prompt+='\n'+walkthrough_guide.read_text()
             report=parse_json(cli(jid,prompt,run,'brief',timeout=1200))
             report['model_graph']=normalize_model_graph(report.get('model_graph'),report.get('sources',[]))
+            report['walkthrough']=normalize_walkthrough(report.get('walkthrough'),report.get('sources',[]))
             needed=['tldr','eli5','overview','method','experiments','code','labs','limitations','related_work','tensor_trace','sources','checks']
             if any(k not in report for k in needed): raise ValueError('분석 응답에 필수 섹션이 누락되었습니다.')
             if any(not isinstance(report[k],str) or not report[k].strip() for k in needed[:-2]): raise ValueError('브리프 섹션 형식이 잘못되었습니다.')
@@ -447,6 +450,52 @@ Do not claim code was cloned unless code-status.json says so. Cite URLs in every
         with LOCK: JOBS[jid].update(status='error',error=str(e)[:1200])
     finally:
         persist_job(jid)
+
+def normalize_walkthrough(value, sources):
+    from urllib.parse import urlsplit
+    def text(value, limit):
+        if not isinstance(value,str):return ''
+        return re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', value).strip()[:limit]
+    def url(value):
+        if not isinstance(value,str) or len(value)>4096 or any(c.isspace() or ord(c)<32 for c in value):return ''
+        try:
+            parsed=urlsplit(value)
+            return value if parsed.scheme=='https' and parsed.hostname and not parsed.username and not parsed.password else ''
+        except ValueError:return ''
+    result={'title':'','scope':'','steps':[]}
+    if not isinstance(value,dict):return result
+    result.update(title=text(value.get('title'),200),scope=text(value.get('scope'),2000))
+    allowed={url(s.get('url')) for s in (sources if isinstance(sources,list) else []) if isinstance(s,dict)}-{''}
+    seen=set()
+    for step in (value.get('steps') if isinstance(value.get('steps'),list) else [])[:40]:
+        if not isinstance(step,dict):continue
+        title=text(step.get('title'),200)
+        explanation=text(step.get('explanation'),6000)
+        if not title or not explanation:continue
+        ident=text(step.get('id'),100)
+        if not re.fullmatch(r'[A-Za-z0-9_-]{1,100}',ident) or ident in seen:ident=f'step-{len(result["steps"])+1}'
+        while ident in seen:ident+='-next'
+        seen.add(ident)
+        evidence=[];urls=set()
+        for item in (step.get('evidence') if isinstance(step.get('evidence'),list) else [])[:20]:
+            if not isinstance(item,dict):continue
+            link=url(item.get('url'))
+            if not link or link not in allowed or link in urls:continue
+            evidence.append({'label':text(item.get('label'),200) or '근거','url':link});urls.add(link)
+        input_shape=text(step.get('input_shape'),1000)
+        output_shape=text(step.get('output_shape'),1000)
+        mode=step.get('mode')
+        verification=step.get('verification')
+        if verification not in ('source','illustrative','unknown'):verification='unknown'
+        if verification=='source' and not evidence:verification='unknown'
+        if not input_shape or not output_shape or mode not in ('training','inference','shared'):verification='unknown'
+        result['steps'].append({'id':ident,'title':title,'explanation':explanation,
+            'operation':text(step.get('operation'),2000),'input_shape':input_shape or '확인 불가',
+            'output_shape':output_shape or '확인 불가','equation':text(step.get('equation'),4000),
+            'mode':mode if mode in ('training','inference','shared') else 'shared',
+            'evidence':evidence,'verification':verification,
+            'concepts':list(dict.fromkeys(text(c,120) for c in (step.get('concepts') if isinstance(step.get('concepts'),list) else [])[:8] if text(c,120)))})
+    return result
 
 def normalize_model_graph(value, sources):
     from urllib.parse import urlsplit
@@ -477,7 +526,7 @@ def normalize_model_graph(value, sources):
 
 def review_draft(jid,run):
     try:
-        value=parse_json(cli(jid,RESEARCH_RULES+'''\nReview draft.json against paper.txt, paper-pdf.txt, discovery.json and code-status.json; inspect code if present. Check numeric results/table settings, equations and symbol definitions, claims vs evidence, actual code snippets/commit anchors, related-work relation types and model_graph adoption evidence, every tensor_trace reshape/matmul/broadcast/mask and train-versus-inference path, experiment-to-module linkage, affiliation vs lab, dates, and unknowns. Do not mark missing facts as verified. Return ONLY {"verdict":"pass|needs_review","issues":["specific issue"],"corrections":[{"section":"tldr|eli5|overview|method|experiments|code|labs|limitations|related_work|tensor_trace","replacement":"complete corrected section Markdown"}]}. Apply all corrections you can support. No fabrication. Missing official code is a limitation, not a reason to invent code. This is single paper, not full survey completion.''',run,'review',timeout=600))
+        value=parse_json(cli(jid,RESEARCH_RULES+'''\nReview draft.json against paper.txt, paper-pdf.txt, discovery.json and code-status.json; inspect code if present. Check numeric results/table settings, equations and symbol definitions, claims vs evidence, actual code snippets/commit anchors, related-work relation types and model_graph adoption evidence, every tensor_trace reshape/matmul/broadcast/mask and train-versus-inference path, experiment-to-module linkage, walkthrough step shapes and source anchors (source means cited, not executed), affiliation vs lab, dates, and unknowns. Do not mark missing facts as verified. Return ONLY {"verdict":"pass|needs_review","issues":["specific issue"],"corrections":[{"section":"tldr|eli5|overview|method|experiments|code|labs|limitations|related_work|tensor_trace","replacement":"complete corrected section Markdown"}]}. Apply all corrections you can support. No fabrication. Missing official code is a limitation, not a reason to invent code. This is single paper, not full survey completion.''',run,'review',timeout=600))
         if not isinstance(value,dict) or value.get('verdict') not in ('pass','needs_review') or not isinstance(value.get('issues'),list) or not isinstance(value.get('corrections',[]),list):raise ValueError('검수 응답 형식 오류')
         if any(not isinstance(f,dict) for f in value.get('corrections',[])):raise ValueError('검수 수정 형식 오류')
         return value
