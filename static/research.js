@@ -215,10 +215,11 @@ window.addEventListener("beforeunload",savePaperPosition);
 
 document.querySelector(".workspace-nav").addEventListener("click",e=>{savePaperPosition();if(e.target.closest("button")?.id!=="catalog")document.body.classList.remove("catalog-mode")},true);
 
-function progressGauge(done,total,label,unit=''){
+function progressGauge(done,total,label,unit='',status='running'){
  const valid=Number.isFinite(done)&&Number.isFinite(total)&&total>0,n=valid?Math.max(0,Math.min(total,done)):0,measured=valid&&!!unit,complete=valid&&n===total;
  const value=measured?`<strong>${Math.floor(n/total*100)}%</strong><span>${n}/${total}${escape(unit)}</span>`:complete?'<span>완료</span>':'';
- return `<div class="work-progress"><div><span>${escape(label)}</span>${value}</div><progress ${measured?`max="${total}" value="${n}"`:complete?'max="1" value="1"':''} aria-label="${escape(label)}"></progress></div>`;
+ const bar=!measured&&!complete&&['done','partial','error'].includes(status)?'':`<progress ${measured?`max="${total}" value="${n}"`:complete?'max="1" value="1"':''} aria-label="${escape(label)}"></progress>`;
+ return `<div class="work-progress"><div><span>${escape(label)}</span>${value}</div>${bar}</div>`;
 }
 
 async function openPaperWalkthrough(p,r){
