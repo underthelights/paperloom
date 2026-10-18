@@ -1,0 +1,12 @@
+{
+  "repository": "https://github.com/IBM/plex",
+  "commit": "71f558992315a12ca1f06a2215d57962a1992162",
+  "path": "packages/plex-sans-kr/fonts/complete/woff2/hinted",
+  "license": "SIL Open Font License 1.1",
+  "sha256": {
+    "IBMPlexSansKR-Regular.woff2": "055a35664c3c3965161c92292504c5633ba9604ec904edc1ed799bf2a436276d",
+    "IBMPlexSansKR-SemiBold.woff2": "5ad7db28ba74d59fe14c260205c62ddb701320f4f098d8a45ef2757bebc29666",
+    "IBMPlexSansKR-Bold.woff2": "cf874a368dc2c2c0e4d1933c35611b849e48942023bfdd1fa11128475dbc4860",
+    "license.txt": "91c25c350d3cac39da2736d74f7ba37ef648f5237a4e330a240615bc8d8c4360"
+  }
+}
