@@ -294,7 +294,7 @@ class Handler(BaseHTTPRequestHandler):
             if path=='/api/workspace/links':
                 query=dict(__import__('urllib.parse',fromlist=['parse_qsl']).parse_qsl(urlparse(self.path).query))
                 return self.send(workspace_links.links(query.get('kind'),query.get('id')))
-            if path=='/api/concepts': return self.send(knowledge.concepts())
+            if path=='/api/concepts': return self.send(knowledge.concept_index())
             if path.startswith('/api/concept/paper/'):return self.send(concept_pipeline.result(path.rsplit('/',1)[1]))
             if path.startswith('/api/people/'): return self.send(knowledge.people(path.rsplit('/',1)[1]))
             if path.startswith('/api/concept/study/'):
