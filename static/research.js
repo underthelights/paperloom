@@ -25,9 +25,28 @@ function renderList(){
 let openPapers=[];
 try{openPapers=JSON.parse(localStorage.getItem('research.openPapers')||'[]').filter(x=>x&&typeof x.id==='string').slice(-20)}catch{}
 function savePaperPosition(){const p=openPapers.find(x=>x.id===activeId);if(p){p.view=tab;p.scroll=$('#content').scrollTop}localStorage.setItem('research.openPapers',JSON.stringify(openPapers))}
+let closingPaperTab=false;
+async function closePaperTab(id=activeId){
+ if(closingPaperTab||!id||!openPapers.some(p=>p.id===id))return;
+ closingPaperTab=true;
+ try{
+  const index=openPapers.findIndex(p=>p.id===id);
+  openPapers=openPapers.filter(p=>p.id!==id);
+  localStorage.setItem('research.openPapers',JSON.stringify(openPapers));
+  if(id===activeId){
+   ++selectionRequest;
+   if(openPapers.length)await select(openPapers[Math.min(index,openPapers.length-1)].id);
+   else{activeId=null;paper=null;localStorage.removeItem('research.active');await openCatalog({})}
+  }
+ }catch(error){
+  toast(error.message);
+  if(activeId===id){activeId=null;paper=null;localStorage.removeItem('research.active');try{await openCatalog({})}catch{}}
+ }finally{closingPaperTab=false;renderPaperTabs()}
+}
+window.addEventListener('paperloom-close-active-tab',()=>closePaperTab());
 function renderPaperTabs(){
  const root=$('#paper-tabs');root.innerHTML=openPapers.map(p=>`<div class="paper-tab ${p.id===activeId?'active':''}"><button data-paper-tab="${escape(p.id)}" aria-current="${p.id===activeId?'page':'false'}" title="${escape(p.title)}">${escape(p.title)}</button><button data-close-paper="${escape(p.id)}" aria-label="${escape(p.title)} 닫기">×</button></div>`).join('')+'<button id="tab-library" title="서가에서 논문 열기">＋</button>';
- root.onclick=async e=>{const close=e.target.closest('[data-close-paper]'),open=e.target.closest('[data-paper-tab]');if(close){const id=close.dataset.closePaper,index=openPapers.findIndex(p=>p.id===id);openPapers=openPapers.filter(p=>p.id!==id);localStorage.setItem('research.openPapers',JSON.stringify(openPapers));if(id===activeId){if(openPapers.length)await select(openPapers[Math.min(index,openPapers.length-1)].id);else{activeId=null;paper=null;openCatalog({})}}renderPaperTabs()}else if(open){try{await select(open.dataset.paperTab)}catch(err){toast(err.message)}}else if(e.target.closest('#tab-library')){savePaperPosition();openCatalog({})}};
+ root.onclick=async e=>{const close=e.target.closest('[data-close-paper]'),open=e.target.closest('[data-paper-tab]');if(close){await closePaperTab(close.dataset.closePaper)}else if(open){try{await select(open.dataset.paperTab)}catch(err){toast(err.message)}}else if(e.target.closest('#tab-library')){savePaperPosition();openCatalog({})}};
 }
 async function select(id,view){
  savePaperPosition();
@@ -104,7 +123,7 @@ $$('[data-filter]').forEach(b=>b.onclick=()=>{filter=b.dataset.filter;$$('[data-
 $$('[data-tab]').forEach(b=>b.onclick=()=>{savePaperPosition();tab=b.dataset.tab;const opened=openPapers.find(p=>p.id===activeId);if(opened){opened.view=tab;opened.scroll=0}$$('[data-tab]').forEach(x=>x.classList.toggle('selected',x===b));renderContent()});
 $$('[data-side]').forEach(b=>b.onclick=()=>{$$('[data-side]').forEach(x=>x.classList.toggle('selected',x===b));$('#chat-pane').hidden=b.dataset.side!=='chat';$('#notes-pane').hidden=b.dataset.side!=='notes'});
 $('#toggle-side').onclick=()=>document.body.classList.toggle('no-side');$('#export').onclick=()=>{if(paper?.reports?.length)location.href='/api/research/export/'+paper.id};
-$('#notes').oninput=()=>{clearTimeout(noteTimer);const id=paper.id,notes=$('#notes').value;$('#note-status').textContent='저장 중…';noteTimer=setTimeout(async()=>{try{await api('research/note',{id,notes});if(paper.id===id)$('#note-status').textContent='저장됨'}catch(e){toast(e.message)}},600)};
+$('#notes').oninput=()=>{clearTimeout(noteTimer);const id=paper.id,notes=$('#notes').value;$('#note-status').textContent='저장 중…';noteTimer=setTimeout(async()=>{try{await api('research/note',{id,notes});if(paper?.id===id)$('#note-status').textContent='저장됨'}catch(e){toast(e.message)}},600)};
 $('#suggestions').onclick=e=>{const b=e.target.closest('[data-question]');if(b){$('#question').value=b.dataset.question;$('#question').focus()}};
 $('#chat-form').onsubmit=async e=>{e.preventDefault();if(chatJob){await api('chat-cancel',{job_id:chatJob});return}const question=$('#question').value.trim();if(!question||!paper)return;const pid=paper.id;try{const j=await api('research/chat',{id:pid,question,quote,mode:paper.reports.length?'paper':'general'});chatJob=j.id;$('#send').textContent='중지';$('#chat-status').textContent='Codex 답변 작성 중…';const poll=setInterval(async()=>{try{const v=await api('chat-jobs/'+j.id);if(['done','error','cancelled'].includes(v.status)){clearInterval(poll);chatJob=null;$('#send').textContent='보내기 ↑';$('#chat-status').textContent='현재 브리프·선택 문맥';if(v.status==='done'){if(paper.id===pid){paper=await api('research/paper/'+pid);renderChat();$('#question').value='';quote='';$('#quote-chip').hidden=true}}else if(v.error)toast(v.error)}}catch(e){clearInterval(poll);chatJob=null;$('#send').textContent='보내기 ↑';toast(e.message)}},1200)}catch(e){toast(e.message)}};
 $('#question').onkeydown=e=>{if(e.key==='Enter'&&(e.metaKey||e.ctrlKey)){$('#chat-form').requestSubmit();e.preventDefault()}};

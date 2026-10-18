@@ -59,7 +59,9 @@ async function start() {
   });
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     ...(process.platform === 'darwin' ? [{ role: 'appMenu' }] : []),
-    { role: 'fileMenu' }, { role: 'editMenu' }, { role: 'viewMenu' }, { role: 'windowMenu' },
+    { label: '파일', submenu: [{ id: 'close-paper-tab', label: '현재 논문 탭 닫기', accelerator: 'CmdOrCtrl+W', click: () => {
+      if (window && !window.isDestroyed()) window.webContents.executeJavaScript("window.dispatchEvent(new Event('paperloom-close-active-tab'))").catch(() => {});
+    } }], }, { role: 'editMenu' }, { role: 'viewMenu' }, { role: 'windowMenu' },
     { label: '라이브러리', submenu: [{ label: '데이터 폴더 열기', click: () => shell.openPath(data) }] },
   ]));
   await createWindow();
@@ -69,6 +71,15 @@ async function createWindow() {
   window = new BrowserWindow({ width: 1440, height: 960, minWidth: 960, minHeight: 640,
     title: 'Paperloom', backgroundColor: '#f8f7f4', show: false,
     webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true },
+  });
+  window.webContents.on('before-input-event', (event, input) => {
+    const modifier = process.platform === 'darwin' ? input.meta : input.control;
+    if (modifier && !input.alt && !input.shift && input.key.toLowerCase() === 'w') {
+      event.preventDefault();
+      if (input.type === 'keyDown' && !input.isAutoRepeat) {
+        window.webContents.executeJavaScript("window.dispatchEvent(new Event('paperloom-close-active-tab'))").catch(() => {});
+      }
+    }
   });
   window.webContents.session.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
   window.webContents.setWindowOpenHandler(({ url }) => { external(url); return { action: 'deny' }; });
