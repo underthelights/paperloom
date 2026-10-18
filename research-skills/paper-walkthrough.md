@@ -1,6 +1,6 @@
 # Paper walkthrough: 근거가 있는 연산 단계
 
-단일 논문 JSON 보고서에 선택적 `walkthrough` 객체를 작성한다. 논문·공식 코드에서 확인한 실제 연산을 단계별로 읽는 UI의 데이터이며 실행 가능한 프로그램이나 학습 재현 결과가 아니다. 기존 보고서에 이 필드가 없어도 유효하다.
+새 단일 논문 JSON 보고서에 `walkthrough` 객체를 작성한다. 근거가 없으면 빈 steps와 scope에 구체적인 이유를 기록한다. 논문·공식 코드에서 확인한 실제 연산을 단계별로 읽는 UI의 데이터이며 실행 가능한 프로그램이나 학습 재현 결과가 아니다. 기존 보고서에 이 필드가 없어도 유효하다.
 
 ```json
 {"walkthrough":{"title":"논문명 · 연산 흐름","scope":"검토한 구현 commit, 구성과 확인하지 못한 경계","steps":[{"id":"stable-ascii-id","title":"구체적 모듈/연산명","explanation":"입력의 의미, 이 연산이 필요한 이유, 출력의 사용처와 모든 축의 정의","operation":"코드에서 확인한 reshape / permute / matmul 등","input_shape":"[B,T,H,W,C]; B=batch, ...","output_shape":"[B,C,T,H,W]","equation":"실제 수식 또는 빈 문자열","mode":"shared","evidence":[{"label":"파일·함수·행 또는 논문 절/표","url":"https://..."}],"verification":"source","concepts":["실제로 대응하는 개념명"]}]}}
