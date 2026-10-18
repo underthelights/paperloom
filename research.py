@@ -398,23 +398,25 @@ def normalize_model_graph(value, sources):
         try:return v if urlsplit(v).scheme=='https' and urlsplit(v).hostname else ''
         except ValueError:return ''
     if not isinstance(value,dict):return {'center':'','nodes':[],'edges':[]}
-    allowed={url(x.get('url')) for x in sources if isinstance(x,dict)}-{''}
+    allowed={url(x.get('url')) for x in (sources if isinstance(sources,list) else []) if isinstance(x,dict)}-{''}
     nodes=[];ids=set()
     for n in (value.get('nodes') if isinstance(value.get('nodes'),list) else [])[:24]:
         if not isinstance(n,dict):continue
-        ident=str(n.get('id',''))[:100]
-        if not ident or ident in ids or not n.get('label'):continue
+        ident=n.get('id')
+        if not isinstance(ident,str) or not ident.strip() or len(ident)>100 or ident in ids:continue
+        if not isinstance(n.get('label'),str) or not n['label'].strip():continue
         item={k:str(n.get(k,'') or '')[:2000] for k in ('label','owner','concept','summary')}
         item.update(id=ident,paper_url=url(n.get('paper_url')),code_url=url(n.get('code_url')))
         nodes.append(item);ids.add(ident)
     edges=[]
     for e in (value.get('edges') if isinstance(value.get('edges'),list) else [])[:100]:
         if not isinstance(e,dict) or e.get('kind') not in ('adopted','implementation','related'):continue
-        if e.get('source') not in ids or e.get('target') not in ids or e['source']==e['target']:continue
-        evidence=[{'url':v['url'],'label':str(v.get('label','근거'))[:200]} for v in (e.get('evidence') if isinstance(e.get('evidence'),list) else []) if isinstance(v,dict) and v.get('url') in allowed]
+        if any(not isinstance(e.get(k),str) for k in ('source','target','reason')):continue
+        if e['source'] not in ids or e['target'] not in ids or e['source']==e['target'] or not e['reason'].strip():continue
+        evidence=[{'url':v['url'],'label':str(v.get('label','근거'))[:200]} for v in (e.get('evidence') if isinstance(e.get('evidence'),list) else []) if isinstance(v,dict) and isinstance(v.get('url'),str) and v['url'] in allowed]
         if not evidence or not e.get('reason'):continue
         edges.append({**{k:str(e.get(k,'') or '')[:2000] for k in ('source','target','kind','version','reason')},'evidence':evidence})
-    return {'center':value.get('center') if value.get('center') in ids else (nodes[0]['id'] if nodes else ''),'nodes':nodes,'edges':edges,'checked':now()[:10]}
+    return {'center':value.get('center') if isinstance(value.get('center'),str) and value['center'] in ids else (nodes[0]['id'] if nodes else ''),'nodes':nodes,'edges':edges,'checked':now()[:10]}
 
 def review_draft(jid,run):
     try:
