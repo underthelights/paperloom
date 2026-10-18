@@ -1,0 +1,275 @@
+{
+  "title": "DreamZero · 관측에서 행동까지",
+  "scope": "고정 커밋 ab790c198f의 정적 코드 대조 · 2026-10-18. 실제 모델 forward/로봇 실행을 측정하지 않았습니다. B/T/F/h/w/A/S는 입력과 resolved config에 의존하는 기호입니다. 이 해설은 DreamZero에만 적용합니다.",
+  "steps": [
+    {
+      "id": "pixels",
+      "title": "카메라 프레임을 모델의 축 순서로 정리",
+      "explanation": "시간 순서로 들어온 영상에서 채널 축을 앞으로 옮긴다. 축 이동은 내용의 압축이 아니다. uint8 픽셀은 /255 및 정규화 경로를 거친다. B는 배치, T는 원본 프레임 수, H/W는 영상 크기다.",
+      "operation": "permute",
+      "input_shape": "[B,T,H,W,C]",
+      "output_shape": "[B,C,T,H,W]",
+      "equation": "x[b,t,h,w,c] → x′[b,c,t,h,w]",
+      "mode": "shared",
+      "evidence": [
+        {
+          "label": "고정 커밋 코드",
+          "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L603-L660"
+        }
+      ],
+      "verification": "source",
+      "concepts": [
+        "World Action Models"
+      ]
+    },
+    {
+      "id": "vae",
+      "title": "픽셀 영상을 잠재 영상으로 압축",
+      "explanation": "VAE가 시공간 정보를 잠재 표현으로 변환한다. 잠재 프레임 F를 원본 프레임 T와 같다고 가정하면 안 된다. 기본 14B 구성의 Cz=16이며, Wan2.2 5B의 Cz=48과 구분한다. 선택 VAE와 실제 입력에 따라 F,h,w가 결정된다.",
+      "operation": "encode",
+      "input_shape": "[B,C,T,H,W]",
+      "output_shape": "[B,Cz,F,h,w]",
+      "equation": "z = VAE.encode(x)",
+      "mode": "shared",
+      "evidence": [
+        {
+          "label": "고정 커밋 코드",
+          "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L660-L680"
+        }
+      ],
+      "verification": "source",
+      "concepts": [
+        "Video Diffusion Models",
+        "Wan Video Models"
+      ]
+    },
+    {
+      "id": "patch",
+      "title": "잠재 영상을 토큰 행렬로 펼치기",
+      "explanation": "I2V 조건 y와 채널 방향으로 결합한 뒤 (1,2,2) 크기 3D convolution으로 patch를 만든다. 공간 2×2 영역이 한 토큰이 되며 시간 축은 이 patch 단계에서 줄이지 않는다. flatten과 transpose 뒤 각 행이 토큰, 열이 특징이다.",
+      "operation": "patchify",
+      "input_shape": "[B,Cin,F,h,w]",
+      "output_shape": "[B,Nv,D]",
+      "equation": "Nv = F·⌊h/2⌋·⌊w/2⌋",
+      "mode": "shared",
+      "evidence": [
+        {
+          "label": "고정 커밋 코드",
+          "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L2030-L2075"
+        }
+      ],
+      "verification": "source",
+      "concepts": [
+        "Video Diffusion Models"
+      ]
+    },
+    {
+      "id": "action",
+      "title": "행동·상태를 영상과 같은 특징 폭으로 투영",
+      "explanation": "행동은 action encoder, 상태는 state MLP를 통해 폭 D에 맞춘다. A는 행동 horizon, S는 상태 수, da/ds는 패딩을 포함한 차원이다. 단위와 패딩 제거는 로봇별 데이터 transform에서 확인해야 한다.",
+      "operation": "project",
+      "input_shape": "action [B,A,da]; state [B,S,ds]",
+      "output_shape": "[B,A,D]; [B,S,D]",
+      "equation": "action_encoder(a,t), state_encoder(s)",
+      "mode": "shared",
+      "evidence": [
+        {
+          "label": "고정 커밋 코드",
+          "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L1280-L1390"
+        }
+      ],
+      "verification": "source",
+      "concepts": [
+        "World Action Models"
+      ]
+    },
+    {
+      "id": "concat",
+      "title": "영상 다음에 행동과 상태를 붙이기",
+      "explanation": "토큰 배열은 영상 전체, 행동 전체, 상태 전체 순서다. 배열의 순서와 어떤 토큰을 볼 수 있는지 정하는 causal mask는 별개다. 언어/이미지 context는 별도 조건 경로로 전달된다.",
+      "operation": "concat",
+      "input_shape": "[B,Nv,D] + [B,A,D] + [B,S,D]",
+      "output_shape": "[B,Nv+A+S,D]",
+      "equation": "tokens = concat(video, action, state; axis=1)",
+      "mode": "shared",
+      "evidence": [
+        {
+          "label": "고정 커밋 코드",
+          "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L2030-L2160"
+        }
+      ],
+      "verification": "source",
+      "concepts": [
+        "World Action Models"
+      ]
+    },
+    {
+      "id": "attention",
+      "title": "각 토큰이 필요한 문맥을 읽기",
+      "explanation": "14B YAML의 D=5120, head 수=40이므로 head당 폭은 128이다. Q/K에 위치 정보를 반영하고 mask로 허용된 문맥만 읽는다. 아래 softmax 조절기는 원리를 보여주는 교육용 숫자이며 DreamZero의 실제 attention 측정값이 아니다.",
+      "operation": "attention",
+      "input_shape": "[B,N,5120] → Q,K,V [B,N,40,128]",
+      "output_shape": "[B,N,5120]",
+      "equation": "Attention(Q,K,V) = softmax(QKᵀ/√128 + M)V",
+      "mode": "shared",
+      "evidence": [
+        {
+          "label": "고정 커밋 코드",
+          "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/configs/model/dreamzero/action_head/wan_flow_matching_action_tf.yaml"
+        },
+        {
+          "label": "attention 구현",
+          "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L786-L1140"
+        }
+      ],
+      "verification": "source",
+      "concepts": [
+        "World Action Models"
+      ]
+    },
+    {
+      "id": "noise",
+      "title": "학습용 noisy sample과 정답 속도 만들기",
+      "explanation": "깨끗한 영상/행동과 Gaussian noise를 σ 비율로 섞는다. σ를 미분하면 ε−x가 되므로 모델이 맞힐 target은 noise ε 자체가 아니다. 영상·행동의 timestep 결합/분리는 설정에 달려 있다.",
+      "operation": "interpolate",
+      "input_shape": "clean x, noise ε (동일 shape)",
+      "output_shape": "xσ, target v* (입력과 동일 shape)",
+      "equation": "xσ=(1−σ)x+σε; ∂xσ/∂σ=ε−x",
+      "mode": "training",
+      "evidence": [
+        {
+          "label": "고정 커밋 코드",
+          "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/flow_match_scheduler.py#L73-L95"
+        }
+      ],
+      "verification": "source",
+      "concepts": [
+        "Flow Matching"
+      ]
+    },
+    {
+      "id": "teacher",
+      "title": "학습에서는 정답 영상 문맥을 함께 제공",
+      "explanation": "clean_x의 영상 토큰을 noisy sequence 앞에 붙인다. 정답 문맥을 주는 teacher forcing이다. 미래 정답을 얻을 수 없는 추론에서는 이 전체 prefix를 그대로 사용할 수 없다.",
+      "operation": "concat",
+      "input_shape": "clean video [B,Nv,D]; noisy [B,Nv+A+S,D]",
+      "output_shape": "[B,2Nv+A+S,D]",
+      "equation": "training tokens = [clean_video; noisy_video; action; state]",
+      "mode": "training",
+      "evidence": [
+        {
+          "label": "고정 커밋 코드",
+          "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L2030-L2160"
+        }
+      ],
+      "verification": "source",
+      "concepts": [
+        "World Action Models"
+      ]
+    },
+    {
+      "id": "loss",
+      "title": "예측 속도와 정답 속도를 비교",
+      "explanation": "clean prefix를 제거하고 영상은 unpatchify, 행동은 action decoder로 복원한다. 영상·행동 MSE에 timestep 가중치를 적용한다. 행동에는 action_mask와 행동 존재 여부를 반영하며, 유효 mask 개수로 나누는 평균이라고 해석하면 안 된다.",
+      "operation": "loss",
+      "input_shape": "video prediction [B,Cz,F,h,w]; action [B,A,da]",
+      "output_shape": "scalar loss",
+      "equation": "L = Lvideo + Laction; target = ε−x",
+      "mode": "training",
+      "evidence": [
+        {
+          "label": "고정 커밋 코드",
+          "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L750-L815"
+        }
+      ],
+      "verification": "source",
+      "concepts": [
+        "Flow Matching"
+      ]
+    },
+    {
+      "id": "cache",
+      "title": "추론에서는 새 관측으로 캐시를 갱신",
+      "explanation": "처음 관측은 timestep 0에서 KV cache를 준비한다. 이후 실제 관측이 도착하면 예측 문맥을 해당 관측 잠재값으로 갱신한다. 상상한 미래만 누적하는 방식이 아니다. 캐시의 전체 수치 shape은 현재 입력/config 없이 확정하지 않는다.",
+      "operation": "cache",
+      "input_shape": "observed latent [B,Cz,Fobs,h,w]; previous KV",
+      "output_shape": "updated video KV; 현재 block 조건",
+      "equation": "context ← actual observation",
+      "mode": "inference",
+      "evidence": [
+        {
+          "label": "고정 커밋 코드",
+          "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L973-L1210"
+        }
+      ],
+      "verification": "source",
+      "concepts": [
+        "KV Cache Observation Replacement",
+        "Closed-loop Control"
+      ]
+    },
+    {
+      "id": "sample",
+      "title": "영상과 행동을 별도 스케줄러로 갱신",
+      "explanation": "영상 noise와 행동 noise에서 시작해 DiT가 예측한 속도로 반복 갱신한다. 두 scheduler는 별도다. 이 함수에서 CFG는 영상 prediction에 적용하며 행동 업데이트는 conditional action prediction을 사용한다.",
+      "operation": "denoise",
+      "input_shape": "video [B,Cz,nf,h,w]; action [B,A,da]",
+      "output_shape": "denoised video/action (각 입력과 동일 shape)",
+      "equation": "vvideo = vu + scale·(vc−vu)",
+      "mode": "inference",
+      "evidence": [
+        {
+          "label": "고정 커밋 코드",
+          "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L1212-L1305"
+        }
+      ],
+      "verification": "source",
+      "concepts": [
+        "Flow Matching",
+        "Asynchronous Inference"
+      ]
+    },
+    {
+      "id": "output",
+      "title": "반환값과 로봇 명령의 경계를 구분",
+      "explanation": "action_pred는 행동 tensor, video_pred는 VAE latent다. video_pred를 RGB 영상이라고 부르면 틀린다. 역정규화·패딩 제거·제어 주기·실행 chunk 선택은 배포 wrapper에서 확인해야 하며, 여기서는 실제 로봇 명령까지 실행 검증하지 않았다.",
+      "operation": "decode",
+      "input_shape": "final latent video/action",
+      "output_shape": "action_pred [B,A,da]; video_pred [B,Cz,Fout,h,w]",
+      "equation": "video_pred ≠ RGB; RGB needs VAE.decode",
+      "mode": "inference",
+      "evidence": [
+        {
+          "label": "고정 커밋 코드",
+          "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L1307-L1338"
+        }
+      ],
+      "verification": "source",
+      "concepts": [
+        "World Action Models",
+        "Closed-loop Control"
+      ]
+    },
+    {
+      "id": "experiments",
+      "title": "빠른 추론이 항상 같은 성능을 뜻하지 않음",
+      "explanation": "Table 3: 4-step 83±6.1%·350ms, 1-step 52±10.2%·150ms, Flash 1-step 74±10.1%·150ms. metric은 표의 task progress다. Flash는 별도 학습 접근이다. Table 4의 AR과 BD는 모두 50% point estimate이므로 AR 정확도 우위로 해석하지 않는다. 모두 논문 보고값이며 현재 컴퓨터 측정이 아니다.",
+      "operation": "compare",
+      "input_shape": "논문 Table 3/4의 조건별 task progress·latency",
+      "output_shape": "속도/성능 절충; 조건별 비교",
+      "equation": "350/150 ≈ 2.33; 83−74 = 9 percentage points",
+      "mode": "shared",
+      "evidence": [
+        {
+          "label": "논문 실험 근거",
+          "url": "https://arxiv.org/html/2602.15922"
+        }
+      ],
+      "verification": "source",
+      "concepts": [
+        "Asynchronous Inference",
+        "World Action Models"
+      ]
+    }
+  ]
+}

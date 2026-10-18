@@ -57,6 +57,7 @@ function renderContent(){
  if(tab==='concepts'&&window.renderNotebooks){renderNotebooks(paper.id);return}
  if(tab==='discovery'){renderDiscovery(paper);return}
  if(tab==='graph'){renderGraph();return}
+ if(tab==='walkthrough'){openPaperWalkthrough(paper,r);return}
  if(tab==='html'){renderOriginal();return}
  if(tab==='annotations'){renderAnnotations();return}
  if(tab==='pdf'){renderPdf();return}
@@ -139,3 +140,12 @@ window.addEventListener("beforeunload",savePaperPosition);
 document.querySelector(".workspace-nav").addEventListener("click",e=>{savePaperPosition();if(e.target.closest("button")?.id!=="catalog")document.body.classList.remove("catalog-mode")},true);
 
 function progressGauge(done,total,label){const n=Math.max(0,Math.min(total,done)),percent=total?Math.floor(n/total*100):0;return `<div class="work-progress"><div><span>${escape(label)}</span><strong>${percent}%</strong></div><progress max="${total||1}" value="${n}" aria-label="${escape(label)}"></progress><small>${n} / ${total} 단계 완료</small></div>`}
+
+async function openPaperWalkthrough(p,r){
+ const epoch=renderEpoch;let report=r||{};
+ if(!report.walkthrough?.steps?.length&&/^2602\.15922(v\d+)?$/.test(p.arxiv||'')){
+  $('#content').innerHTML='<p class="caption">연산 해설을 불러오는 중…</p>';
+  try{const response=await fetch('/dreamzero-walkthrough.json');if(!response.ok)throw Error('연산 해설 자료를 찾지 못했습니다.');report={...report,walkthrough:await response.json()}}catch(e){if(epoch===renderEpoch)$('#content').textContent=e.message;return}
+ }
+ if(epoch!==renderEpoch)return;renderPaperWalkthrough(p,report);
+}
