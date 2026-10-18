@@ -216,7 +216,7 @@ function progressGauge(done,total,label){const n=Math.max(0,Math.min(total,done)
 
 async function openPaperWalkthrough(p,r){
  const epoch=renderEpoch;let report=r||{};
- if((!report.walkthrough?.steps?.length||!report.walkthrough?.execution_profile?.config)&&/^2602\.15922(v\d+)?$/.test(p.arxiv||'')){
+ if(!report.walkthrough?.validation&&(!report.walkthrough?.steps?.length||!report.walkthrough?.execution_profile?.config)&&/^2602\.15922(v\d+)?$/.test(p.arxiv||'')){
   $('#content').innerHTML='<p class="caption">연산 해설을 불러오는 중…</p>';
   try{const response=await fetch('/dreamzero-walkthrough.json');if(!response.ok)throw Error('연산 해설 자료를 찾지 못했습니다.');report={...report,walkthrough:await response.json()}}catch(e){if(epoch===renderEpoch)$('#content').textContent=e.message;return}
  }

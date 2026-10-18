@@ -329,16 +329,16 @@ def collect_figures(aid,run):
         except Exception: continue
     return figures
 
-def cli(jid,prompt,run,name,timeout=900,intake=False,reasoning="medium"):
+def cli(jid,prompt,run,name,timeout=900,intake=False,reasoning=None):
     executable=desktop_ai.codex_path()
     if not executable: raise ValueError('Codex CLI 설치와 로그인이 필요합니다.')
     output=run/(name+'.txt')
+    effort=reasoning or ('medium' if intake else 'high')
+    if effort not in ('low','medium','high'):raise ValueError('Invalid reasoning effort')
     cmd=[executable,'exec','--ignore-user-config','--ephemeral','--skip-git-repo-check','--sandbox','read-only',
-         '-c','web_search="live"','-c','model_reasoning_effort="high"','--json','--output-last-message',str(output),'-C',str(run),'-']
+         '-c','web_search="live"','-c','model_reasoning_effort="'+effort+'"','--json','--output-last-message',str(output),'-C',str(run),'-']
     if intake:
         cmd[-1:-1]=['--disable','shell_tool']
-        if reasoning not in ('low','medium','high'):raise ValueError('Invalid reasoning effort')
-        cmd[cmd.index('model_reasoning_effort="high"')]='model_reasoning_effort="'+reasoning+'"'
     env=os.environ.copy();env['PATH']='/opt/homebrew/bin:/usr/local/bin:'+env.get('PATH','')
     (run/(name+'-prompt.txt')).write_text(prompt)
     with (run/(name+'-events.jsonl')).open('w') as stdout, (run/(name+'-stderr.txt')).open('w') as stderr:
@@ -485,6 +485,8 @@ def normalize_walkthrough(value, sources):
     result={'title':'','scope':'','steps':[]}
     if not isinstance(value,dict):return result
     result.update(title=text(value.get('title'),200),scope=text(value.get('scope'),2000))
+    if isinstance(value.get('steps'),list) and len(value['steps'])>40:
+        result['truncated']=True
     allowed={url(s.get('url')) for s in (sources if isinstance(sources,list) else []) if isinstance(s,dict)}-{''}
     def normalize_evidence(value):
         evidence=[];urls=set()
@@ -572,18 +574,37 @@ def analyze_tensor_trace(jid,run,code,manifest):
     result={'title':'코드·설정 기반 텐서 추적','scope':'자동 코드 추적 미완료','steps':[]}
     try:
         for attempt in range(2):
-            response=parse_json(cli(jid,prompt,run,'tensor-trace' if attempt==0 else 'tensor-trace-repair',timeout=1200))
+            response=parse_json(cli(jid,prompt,run,'tensor-trace' if attempt==0 else 'tensor-trace-repair',timeout=1200,reasoning='high' if attempt==0 else 'medium'))
             new_sources=[s for s in response.get('sources',[]) if isinstance(s,dict)] if isinstance(response,dict) and isinstance(response.get('sources'),list) else []
-            candidate=normalize_walkthrough(response.get('walkthrough') if isinstance(response,dict) else None,new_sources)
+            raw=response.get('walkthrough') if isinstance(response,dict) else None
+            patch=response.get('walkthrough_patch') if isinstance(response,dict) else None
+            profile_conflict=False
+            if attempt and isinstance(patch,dict):
+                import copy
+                raw=copy.deepcopy(result)
+                replacements={s['id']:s for s in patch.get('replace_steps',[]) if isinstance(s,dict) and isinstance(s.get('id'),str)} if isinstance(patch.get('replace_steps'),list) else {}
+                raw['steps']=[replacements.get(s['id'],s) for s in raw['steps']]
+                if isinstance(patch.get('append_steps'),list):raw['steps']+=patch['append_steps']
+                if isinstance(patch.get('execution_profile'),dict):
+                    old=raw.get('execution_profile',{});new=patch['execution_profile']
+                    profile_conflict=any(old.get(k) and old.get(k)!=new.get(k) for k in ('repository','commit','config')) and old.get('config') in {f['path'] for f in manifest.get('files',[])}
+                    if not profile_conflict:raw['execution_profile']=new
+                if isinstance(patch.get('scope'),str):raw['scope']=patch['scope']
+                new_sources=sources+new_sources
+            candidate=normalize_walkthrough(raw,new_sources)
             if attempt and result['steps'] and not candidate['steps']:
                 result['validation']['issues'].append('보정 응답에 단계가 없어 이전 부분 결과를 보존했습니다.')
                 break
             sources=new_sources
             result=candidate
             result['validation']=tensor_evidence.validate_trace(result,manifest)
+            if profile_conflict:
+                result['validation']['status']='needs_review'
+                result['validation']['issues'].append('보정이 선택한 코드·설정을 변경하려 했습니다. 다른 variant를 혼합하지 않고 검수 필요로 보존합니다.')
             (run/('tensor-trace-normalized.json')).write_text(json.dumps(result,ensure_ascii=False,indent=2))
             if result['validation']['status']=='source_checked':break
-            prompt+='\nRepair the previous tensor-trace-normalized.json by inspecting the actual source. Preserve unknowns. These mechanical checks failed: '+json.dumps(result['validation']['issues'],ensure_ascii=False)
+            prompt=RESEARCH_RULES+'''\nRepair tensor-trace-normalized.json using its SAME selected configuration. Read the previous trace and only the source functions needed to address failed checks; do not dump entire modules or repeat existing correct steps. Preserve unresolved runtime/checkpoint boundaries. Return ONLY {"walkthrough_patch":{"replace_steps":[complete corrected steps with existing ids],"append_steps":[complete missing steps],"execution_profile":{complete existing profile only if correction needed},"scope":"optional corrected scope"},"sources":[new source references]}. Omit unchanged fields. This patch will be merged, normalized and source-validated. Do not replace missing inference evidence with guesses or teach-by-toy arrays. If the inference checkpoint is unavailable, inspect source methods with symbolic dimensions and explicit conditional settings; retain unknowns.\n'''+json.dumps(result['validation']['issues'],ensure_ascii=False)
+            if guide.is_file():prompt+='\n'+guide.read_text()
     except InterruptedError:raise
     except Exception as exc:
         result['validation']={'status':'needs_review','issues':['코드 추적 검수를 완료하지 못했습니다: '+str(exc)[:600]],'execution':'static-only'}

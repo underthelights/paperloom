@@ -73,6 +73,8 @@ def inventory(root, code):
 def validate_trace(trace, manifest):
     """Checks existence/bounds and completeness, not semantic execution correctness."""
     issues = []
+    if trace.get('truncated'):
+        issues.append('추적 단계가 표시 제한을 초과했습니다. 전체 경로 완결성을 확인해야 합니다.')
     files = {f['path']: f for f in manifest.get('files', [])}
     repository, commit = manifest.get('repository', '').rstrip('/'), manifest.get('commit', '')
     prefix = repository + '/blob/' + commit + '/'

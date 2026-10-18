@@ -103,6 +103,18 @@ class TensorEvidenceTests(unittest.TestCase):
         self.assertEqual(result['steps'], [])
         self.assertEqual(result['validation']['status'], 'needs_review')
 
+    def test_focused_patch_adds_missing_path_and_retains_source_metadata(self):
+        first={'walkthrough':self.trace(),'sources':[{'url':self.link},{'url':self.config}]}
+        inference=first['walkthrough']['steps'].pop()
+        patch_response={'walkthrough_patch':{'append_steps':[inference]},'sources':[]}
+        with patch.object(research,'mark'),patch.object(research,'cli',side_effect=[json.dumps(first),json.dumps(patch_response)]) as worker:
+            result,sources=research.analyze_tensor_trace('test',self.root,self.status,self.manifest)
+        self.assertEqual(result['validation']['status'],'source_checked')
+        self.assertEqual(len(result['steps']),2)
+        self.assertEqual(len(sources),2)
+        self.assertEqual(worker.call_args_list[1].kwargs['reasoning'],'medium')
+        self.assertEqual(result['execution_profile']['config'],'config.json')
+
     def test_partial_audit_and_cancellation_are_not_silently_passed(self):
         with patch.object(research, 'mark'), patch.object(research, 'cli', side_effect=ValueError('timeout')):
             trace, _ = research.analyze_tensor_trace('test', self.root, self.status, self.manifest)
