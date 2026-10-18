@@ -14,6 +14,7 @@ import reader
 import discovery
 import paperloom_workflow as workflow
 import knowledge
+import workspace_links
 
 ROOT = Path(__file__).resolve().parent
 DATA = Path(os.environ.get('PAPERLOOM_DATA', ROOT / 'data')).resolve()
@@ -272,6 +273,9 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith('/api/reader/auto/'): return self.send(reader.auto_get(path.rsplit('/',1)[1]))
             if path.startswith('/api/discovery/progress/'):return self.send(discovery.progress(path.rsplit('/',1)[1]))
             if path=='/api/catalog': return self.send(knowledge.catalog(dict(__import__('urllib.parse',fromlist=['parse_qsl']).parse_qsl(urlparse(self.path).query))))
+            if path=='/api/workspace/links':
+                query=dict(__import__('urllib.parse',fromlist=['parse_qsl']).parse_qsl(urlparse(self.path).query))
+                return self.send(workspace_links.links(query.get('kind'),query.get('id')))
             if path=='/api/concepts': return self.send(knowledge.concepts())
             if path.startswith('/api/people/'): return self.send(knowledge.people(path.rsplit('/',1)[1]))
             if path.startswith('/api/concept/export/'):
@@ -328,7 +332,7 @@ class Handler(BaseHTTPRequestHandler):
                 asset=(ROOT/'static'/path.lstrip('/')).resolve()
                 if not asset.is_relative_to((ROOT/'static/pdf-assets').resolve()) or not asset.is_file(): return self.send({'error':'Not found'},404)
                 return self.send(asset.read_bytes(),ctype='application/wasm' if asset.suffix=='.wasm' else 'application/octet-stream')
-            files={'/dreamzero-equations.json':'dreamzero-equations.json','/paper-walkthrough.js':'paper-walkthrough.js','/paper-walkthrough.css':'paper-walkthrough.css','/dreamzero-walkthrough.json':'dreamzero-walkthrough.json','/model-graph.js':'model-graph.js','/model-ecosystem.json':'model-ecosystem.json','/bilingual.js':'bilingual.js','/workspace.css':'workspace.css','/knowledge.js':'knowledge.js','/knowledge.css':'knowledge.css','/workflow.js':'workflow.js','/discovery.js':'discovery.js','/discovery.css':'discovery.css','/reader.js':'reader.js','/reader.css':'reader.css','/':'research.html','/editor.html':'index.html','/inbox.js':'inbox.js','/inbox.css':'inbox.css','/research.js':'research.js','/research.css':'research.css','/math.js':'math.js','/katex.min.css':'katex.min.css','/app.js':'app.js','/style.css':'style.css','/cloud.js':'cloud.js','/library.html':'library.html','/editor.js':'editor.js','/editor.css':'editor.css','/reader-vendor.js':'reader-vendor.js','/pdf.worker.mjs':'pdf.worker.mjs','/pdf-viewer.css':'pdf-viewer.css'}
+            files={'/workspace-links.js':'workspace-links.js','/workspace-links.css':'workspace-links.css','/dreamzero-equations.json':'dreamzero-equations.json','/paper-walkthrough.js':'paper-walkthrough.js','/paper-walkthrough.css':'paper-walkthrough.css','/dreamzero-walkthrough.json':'dreamzero-walkthrough.json','/model-graph.js':'model-graph.js','/model-ecosystem.json':'model-ecosystem.json','/bilingual.js':'bilingual.js','/workspace.css':'workspace.css','/knowledge.js':'knowledge.js','/knowledge.css':'knowledge.css','/workflow.js':'workflow.js','/discovery.js':'discovery.js','/discovery.css':'discovery.css','/reader.js':'reader.js','/reader.css':'reader.css','/':'research.html','/editor.html':'index.html','/inbox.js':'inbox.js','/inbox.css':'inbox.css','/research.js':'research.js','/research.css':'research.css','/math.js':'math.js','/katex.min.css':'katex.min.css','/app.js':'app.js','/style.css':'style.css','/cloud.js':'cloud.js','/library.html':'library.html','/editor.js':'editor.js','/editor.css':'editor.css','/reader-vendor.js':'reader-vendor.js','/pdf.worker.mjs':'pdf.worker.mjs','/pdf-viewer.css':'pdf-viewer.css'}
             if path not in files: return self.send({'error':'Not found'},404)
             name=files[path]
             self.send((ROOT/'static'/name).read_bytes(),ctype={'json':'application/json; charset=utf-8','html':'text/html; charset=utf-8','js':'text/javascript; charset=utf-8','mjs':'text/javascript; charset=utf-8','css':'text/css; charset=utf-8'}[name.split('.')[-1]])

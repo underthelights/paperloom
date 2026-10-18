@@ -76,6 +76,19 @@ class ResearchTests(unittest.TestCase):
 
 
 
+    def test_state_projects_summaries_without_loading_reports(self):
+        research.import_candidates([{'Title':'Projected summary'}])
+        p=research.all_records()[0];p.update(authors=['Author'],reports=[{'method':'x'*100000}],notes='private note')
+        research.save(p)
+        with patch.object(research,'all_records',side_effect=AssertionError('full reports loaded')):
+            result=research.state()
+        row=next(x for x in result['papers'] if x['id']==p['id'])
+        self.assertEqual(row['authors'],['Author'])
+        self.assertEqual(row['report_count'],1)
+        self.assertNotIn('reports',row)
+        self.assertNotIn('notes',row)
+        self.assertEqual(result['counts']['briefs'],1)
+
     def test_public_install_without_personal_seed(self):
         (research.SKILLS/'notion-candidates.json').unlink()
         with research.db() as c:c.execute("DELETE FROM meta WHERE key='seed'")
