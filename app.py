@@ -305,6 +305,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send((research.DATA/'runs'/run/name).read_bytes(),ctype='image/png' if name.endswith('.png') else 'image/jpeg')
             if path.startswith('/api/research/pdf/'):
                 p=research.get(path.rsplit('/',1)[1]); run=p.get('last_run','')
+                if p.get('pdf_sha256'):return self.send(research.local_pdf_path(p).read_bytes(),ctype='application/pdf')
                 if not re.fullmatch('[a-f0-9]{32}',run): raise ValueError('수집한 PDF가 없습니다.')
                 return self.send((research.DATA/'runs'/run/'paper.pdf').read_bytes(),ctype='application/pdf')
             if path=='/api/ai-status': return self.send(desktop_ai.status(sys.modules[__name__]))
@@ -361,6 +362,13 @@ class Handler(BaseHTTPRequestHandler):
             elif path=='/api/research/add':
                 result=research.add(d['value'])
                 if d.get('analyze',True): result={'paper':result,'job':research.start(result['id'])}
+            elif path=='/api/research/upload':
+                result=research.add_pdf(d)
+                response={'paper':result}
+                if d.get('analyze',False):
+                    try:response['job']=research.start(result['id'])
+                    except ValueError as error:response['warning']=str(error)
+                result=response
             elif path=='/api/research/analyze': result=research.start(d['id'])
             elif path=='/api/research/cancel': result=research.cancel(d['id'])
             elif path=='/api/research/note':
