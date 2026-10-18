@@ -1,7 +1,7 @@
 (function(){
  const relationLabels={concept:'공통 개념',prerequisite:'선행 개념',uses:'기술 사용',adopts:'실제 채택',citation:'인용'};
  const drafts=new Map(),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
- const safe=v=>{try{const u=new URL(v);return u.protocol==='https:'&&!u.username&&!u.password?u.href:''}catch{return ''}};
+ const safe=v=>{if(/^\/api\/research\/pdf\/[a-f0-9]{32}$/.test(String(v)))return v;try{const u=new URL(v);return u.protocol==='https:'&&!u.username&&!u.password?u.href:''}catch{return ''}};
  const links=items=>(Array.isArray(items)?items:[]).filter(s=>safe(s.url)).map(s=>`<a href="${esc(safe(s.url))}" target="_blank" rel="noopener noreferrer">${esc(s.label||'출처')} ↗</a>`).join(' ');
  window.mountConceptStudy=function(host,id){
   let disposed=false,timer=null,epoch=0,value=null,tab='concept',selected=null;const prefix=q=>String(id)+'::'+q+'::',key=q=>prefix(q)+(value?.guide?.questions?.find(item=>item.id===q)?.revision||'legacy');

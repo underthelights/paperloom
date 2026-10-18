@@ -1,5 +1,5 @@
 """Cross-paper concept notebooks, evidence-linked people, and catalog queries."""
-import hashlib,json,os,re,subprocess,threading,uuid
+import hashlib,json,os,re,subprocess,threading,uuid,unicodedata
 from pathlib import Path
 import research as R
 import reader
@@ -30,6 +30,12 @@ def get(ident):
 def concepts():
     with R.db() as c:return [json.loads(x[0]) for x in c.execute("SELECT body FROM knowledge WHERE kind='concept' ORDER BY json_extract(body,'$.name')")]
 
+def concept_index():
+    with R.db() as c:rows=c.execute("SELECT id,json_extract(body,'$.name') name,json_extract(body,'$.papers') papers,json_extract(body,'$.annotations') annotations,json_extract(body,'$.aliases') aliases,json_extract(body,'$.updated') updated FROM knowledge WHERE kind='concept' ORDER BY name").fetchall()
+    return [{**dict(r),'kind':'concept','papers':json.loads(r['papers'] or '[]'),'annotations':json.loads(r['annotations'] or '[]'),'aliases':json.loads(r['aliases'] or '[]')} for r in rows]
+
+def concept_key(value):return ' '.join(unicodedata.normalize('NFKC',str(value)).casefold().replace('-',' ').split())
+
 def create(name,pid=None,annotation_id=None):
     with R.db() as c:c.execute('CREATE TABLE IF NOT EXISTS knowledge(id TEXT PRIMARY KEY,kind TEXT NOT NULL,body TEXT NOT NULL)')
     name=str(name).strip()
@@ -37,12 +43,21 @@ def create(name,pid=None,annotation_id=None):
     if pid:R.get(pid)
     ident=hashlib.sha256(R.norm(name).encode()).hexdigest()[:32]
     with R.LOCK:
+        matches=[v for v in concept_index() if concept_key(name) in {concept_key(v['name']),*(concept_key(a) for a in v.get('aliases',[]))}]
+        if len(matches)>1:raise ValueError('동일 이름의 개념이 여러 개입니다. 기존 노트를 선택하세요.')
+        if matches:ident=matches[0]['id']
+        else:
+            try:
+                previous=get(ident)
+                if concept_key(previous['name'])!=concept_key(name):ident=hashlib.sha256(('concept:'+concept_key(name)).encode()).hexdigest()[:32]
+            except ValueError:pass
         if annotation_id:
             a=reader.get(annotation_id)
             if a['paper_id']!=pid:raise ValueError('하이라이트의 논문이 일치하지 않습니다.')
         try:v=get(ident)
         except ValueError:v={'id':ident,'kind':'concept','name':name,'papers':[],'annotations':[],'notes':'','markdown':'','status':'draft','video_status':'idle'}
         if pid and pid not in v['papers']:v['papers'].append(pid)
+        if pid and pid in v.get('pipeline_papers',[]):v['pipeline_papers'].remove(pid)
         if annotation_id and annotation_id not in v['annotations']:v['annotations'].append(annotation_id)
         return put(v)
 

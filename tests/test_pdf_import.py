@@ -62,7 +62,8 @@ class PdfImportTests(unittest.TestCase):
             if name=='brief':return json.dumps(sections)
             return json.dumps({'verdict':'needs_review','issues':['Static test'],'corrections':[]})
         try:
-            with patch.object(R,'cli',side_effect=cli),patch.object(R,'fetch',side_effect=AssertionError('arXiv fetch')):R.run_analysis(jid,p['id'])
+            with patch.object(R,'cli',side_effect=cli),patch.object(R,'fetch',side_effect=AssertionError('arXiv fetch')),patch('concept_pipeline.start') as concept_hook:R.run_analysis(jid,p['id'])
             self.assertEqual(R.JOBS[jid]['status'],'done',R.JOBS[jid].get('error'))
             self.assertEqual(len(R.get(p['id'])['reports']),1)
+            concept_hook.assert_any_call(p['id'])
         finally:R.JOBS.pop(jid,None)
