@@ -4,14 +4,25 @@ let bilingualTimer=null,bilingualValue=null,bilingualEnabled=true,autoEnabled=ne
 async function startBilingual(pid,epoch){
  clearTimeout(bilingualTimer);bilingualValue=null;
  const controls=$('#bilingual-controls');if(!controls)return;
- controls.innerHTML=`<details id="reader-preferences"><summary class="reader-preferences-summary"><strong>번역·하이라이트</strong><span id="reader-settings-state">읽기 설정</span></summary><div class="reader-preferences-body"><div class="bilingual-options"><label><input id="bilingual-toggle" type="checkbox" checked> 영어 옆 한국어</label>${Object.entries(autoLabels).map(([k,v])=>`<label class="auto-label auto-${k}"><input data-auto-category="${k}" type="checkbox" checked>${v}</label>`).join('')}</div><p id="bilingual-status" role="status">문단별 번역·주장 분류를 준비합니다. Codex 사용량을 소비합니다.</p><button id="bilingual-retry" hidden>완료된 문단부터 이어서 처리</button><details><summary>자동 하이라이트 분류 근거 · AI 해석</summary><div id="auto-evidence"></div></details></div></details>`;
+ controls.innerHTML=`<div class="sentence-reading-status"><span>영문 원문 ↔ 한국어 번역</span><span id="sentence-pair-progress" role="status"></span><progress id="sentence-pair-gauge" max="100" value="0" aria-label="문장 대응 진행"></progress></div><details id="reader-preferences"><summary class="reader-preferences-summary"><strong>번역·하이라이트</strong><span id="reader-settings-state">읽기 설정</span></summary><div class="reader-preferences-body"><div class="bilingual-options"><label><input id="bilingual-toggle" type="checkbox" checked> 영어 옆 한국어</label>${Object.entries(autoLabels).map(([k,v])=>`<label class="auto-label auto-${k}"><input data-auto-category="${k}" type="checkbox" checked>${v}</label>`).join('')}</div><p id="bilingual-status" role="status">문단별 번역·주장 분류를 준비합니다. Codex 사용량을 소비합니다.</p><button id="bilingual-retry" hidden>완료된 문단부터 이어서 처리</button><details><summary>자동 하이라이트 분류 근거 · AI 해석</summary><div id="auto-evidence"></div></details></div></details>`;
  bilingualEnabled=true;autoEnabled=new Set(Object.keys(autoLabels));
- $('#bilingual-toggle').onchange=e=>{bilingualEnabled=e.target.checked;$('#original-paper')?.classList.toggle('original-only',!bilingualEnabled)};
+ $('#bilingual-toggle').onchange=e=>{bilingualEnabled=e.target.checked;const root=$('#original-paper');root?.classList.toggle('original-only',!bilingualEnabled);if(root)requestAnimationFrame(()=>alignBilingualSentences(root))};
  $$('[data-auto-category]').forEach(b=>b.onchange=()=>{b.checked?autoEnabled.add(b.dataset.autoCategory):autoEnabled.delete(b.dataset.autoCategory);paintAuto()});
  const current=()=>paper?.id===pid&&renderEpoch===epoch&&!!$('#bilingual-controls');
  async function poll(){try{const v=await api('reader/auto/'+pid);if(!current())return;show(v);if(v.status==='running')bilingualTimer=setTimeout(poll,2500)}catch(e){if(current())$('#bilingual-status').textContent='번역 상태 확인 실패: '+e.message}}
  let positionRestored=false;
- function show(v){bilingualValue=v;applyBilingual();if(!positionRestored){positionRestored=true;requestAnimationFrame(()=>{if(current())$('#content').scrollTop=openPapers.find(p=>p.id===pid)?.scroll||0})}$('#bilingual-status').textContent=`AI 번역·분류 ${Object.keys(v.blocks).length}/${v.total} 문단 · ${({running:'처리 중',ready:'완료',error:'중단',idle:'대기'})[v.status]}${v.error?' · '+v.error:''} · 원문과 대조하세요`;$('#reader-settings-state').textContent=(v.status==='running'?'번역 중 ':v.status==='error'?'번역 중단 ':'번역 ')+Object.keys(v.blocks).length+'/'+v.total;$('#bilingual-retry').hidden=v.status!=='error'}
+ function show(v){
+  bilingualValue=v;applyBilingual();if(!positionRestored){positionRestored=true;requestAnimationFrame(()=>{if(current())$('#content').scrollTop=openPapers.find(p=>p.id===pid)?.scroll||0})}
+  const translated=Object.keys(v.blocks).length,aligned=Object.values(v.blocks).filter(b=>b.sentences?.length).length,total=Number(v.total)||0;
+  const complete=total>0&&aligned===total,percent=total?Math.floor(aligned*100/total):0;
+  const stage=v.status==='running'?'처리 중':v.status==='error'?'중단':complete?'완료':'문장 대응 대기';
+  $('#bilingual-status').textContent=`문단 번역 ${translated}/${total} · 문장 대응 ${aligned}/${total} · ${stage}${v.error?' · '+v.error:''} · AI 번역·분류는 원문과 대조하세요`;
+  $('#reader-settings-state').textContent=`문장 대응 ${percent}%`;
+  $('#sentence-pair-progress').textContent=`${aligned}/${total} · ${percent}%${complete?'': ' · '+stage}`;
+  $('#sentence-pair-gauge').value=percent;
+  $('#bilingual-retry').hidden=v.status==='running'||complete;
+  $('#bilingual-retry').textContent=v.status==='error'?'완료된 문장부터 재시도':'문장별 번역 이어서 처리';
+ }
  $('#bilingual-retry').onclick=async()=>{try{const v=await api('reader/auto',{paper_id:pid,retry:true});if(current()){show(v);bilingualTimer=setTimeout(poll,2500)}}catch(e){if(current())$('#bilingual-status').textContent=e.message}};
  try{const modern=originalDoc?.sentence_alignment_version===1;const v=await api(modern?'reader/auto':'reader/auto/'+pid,modern?{paper_id:pid}:undefined);if(!current())return;show(v);if(v.status==='running')bilingualTimer=setTimeout(poll,2500)}catch(e){if(current())$('#bilingual-status').textContent='자동 번역 시작 실패: '+e.message}
 }
@@ -52,21 +63,21 @@ window.paintBilingualUserHighlights=function(annotations=[]){
  for(const a of annotations){if(a.version!==originalDoc?.version)continue;const selection=a.translated_selection;for(const ko of root.querySelectorAll('[data-ko-sentence]')){if(selection&&ko.dataset.koSentence===selection.sentence_id&&ko.dataset.blockId===selection.block_id){const snapshot=a.translation_snapshot??selection.translation_snapshot;const r=typeof snapshot==='string'&&snapshot!==ko.textContent?null:bilingualLocalRange(ko,selection.start,selection.end);if(r&&r.toString()===selection.exact)CSS.highlights.get('reader-'+a.color)?.add(r)}else if(!selection&&a.start<Number(ko.dataset.enEnd)&&a.end>Number(ko.dataset.enStart)){ko.classList.add('sentence-has-source-note');ko.title='이 번역 문장의 영어 원문에 저장된 하이라이트가 있습니다.'}}}
 };
 
-const bilingualSnapshots=new WeakMap();
+const bilingualSnapshots=new WeakMap(),bilingualBlockSnapshots=new WeakMap();
 function applyBilingual(){
  const root=$('#original-paper');if(!root||!bilingualValue||bilingualValue.version!==originalDoc?.version)return;
  const signature=JSON.stringify(bilingualValue.blocks);const previous=bilingualSnapshots.get(root);if(previous?.signature===signature)return;
  const sources=new Map([...root.querySelectorAll('[data-reader-block]')].map(n=>[n.dataset.readerBlock,n]));
  for(const block of originalDoc.blocks||[]){const source=sources.get(block.id);if(!source)continue;let row=source.parentElement;
  if(!row.classList.contains('bilingual-row')){row=document.createElement('div');row.className='bilingual-row';source.before(row);row.append(source);const ko=document.createElement('div');ko.className='bilingual-ko';ko.dataset.readerGenerated='true';ko.lang='ko';row.append(ko)}
- const output=bilingualValue.blocks[block.id],ko=row.querySelector('.bilingual-ko');const text=output?.ko_template||output?.ko||'한국어 번역 대기 중…';
+ const output=bilingualValue.blocks[block.id],ko=row.querySelector('.bilingual-ko');const blockSignature=JSON.stringify(output??null);if(bilingualBlockSnapshots.get(source)===blockSignature)continue;const text=output?.ko_template||output?.ko||'한국어 번역 대기 중…';
  const paired=bilingualSentencePairs(source,ko,block,output);row.classList.toggle('sentence-aligned',paired);ko.dataset.translationUnit=paired?'sentence':'paragraph';
- if(!paired){const label=document.createElement('small');label.className='bilingual-unit-label';label.dataset.readerGenerated='true';label.textContent=output?'문단 번역':'번역 대기';const body=document.createElement('div');bilingualTranslation(body,text,[...source.querySelectorAll('math')]);ko.append(label,body);ko._sentencePairs=[];window.formatReadingStructure?.(body)}ko.classList.toggle('pending',!output);
+ if(!paired){const label=document.createElement('small');label.className='bilingual-unit-label';label.dataset.readerGenerated='true';label.textContent=output?'문단 번역':'번역 대기';const body=document.createElement('div');bilingualTranslation(body,text,[...source.querySelectorAll('math')]);ko.append(label,body);ko._sentencePairs=[];window.formatReadingStructure?.(body)}ko.classList.toggle('pending',!output);bilingualBlockSnapshots.set(source,blockSignature);
 
  }
  paintHighlights();paintAuto();
  previous?.observer?.disconnect();let width=-1;const observer=new ResizeObserver(()=>{if(!root.isConnected){observer.disconnect();return}const next=root.clientWidth;if(next===width)return;width=next;requestAnimationFrame(()=>alignBilingualSentences(root))});observer.observe(root);requestAnimationFrame(()=>alignBilingualSentences(root));
- bilingualSnapshots.set(root,{signature,observer});
+ bilingualSnapshots.set(root,{signature,observer});document.fonts?.ready.then(()=>{if(root.isConnected)alignBilingualSentences(root)});
  const evidence=$('#auto-evidence');const highlights=Object.values(bilingualValue.blocks).flatMap(b=>bilingualBlockHighlights(b));
  if(!evidence)return;
  evidence.innerHTML=highlights.map((h,i)=>`<button data-auto-jump="${i}" class="auto-evidence-item"><b>${escape(autoLabels[h.category])}</b><q>${escape(h.exact)}</q><span>${escape(h.reason)} · ${escape(h.attribution)}</span></button>`).join('')||'<p>검증된 원문 인용과 분류 이유가 여기에 표시됩니다.</p>';
