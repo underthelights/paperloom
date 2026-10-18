@@ -69,3 +69,15 @@ Stable macOS data lives in `~/Library/Application Support/Paperloom/data`; devel
 Author affiliations, education, and paper relationships retain source links and uncertainty. A model-generated brief or graph edge is not a verified scientific conclusion. Blocked social pages require pasted text or a direct paper URL.
 
 Research guidance is in `research-skills/`, with provenance and the upstream ELI5 license. Bundled third-party licenses are in `LICENSES/`.
+
+### 로컬 PDF 추가
+
+`논문 추가`에서 PDF를 선택하거나 파일을 놓을 수 있습니다. arXiv 등록 여부와 관계없이 원본 PDF를 저장하고 즉시 열람합니다. 제목을 직접 지정할 수 있으며 같은 파일은 SHA-256으로 중복을 방지합니다. `추가 후 원문·코드 분석 시작`을 끄면 AI 분석 없이 저장합니다.
+
+- 한 파일 최대 24MB, 500쪽, 추출 본문 200만 자입니다. 암호화된 PDF는 먼저 잠금을 해제해야 합니다.
+- `추출 본문`은 페이지 번호를 유지한 PDF 텍스트이며 번역·하이라이트·메모에 연결됩니다. 원본 HTML이나 복원된 TeX가 아닙니다. 다단 배치, 수식, 표는 PDF 탭과 대조해야 합니다.
+- 충분한 텍스트가 없는 PDF는 저장·열람할 수 있지만 자동 분석을 시작하지 않습니다. 스캔 문서는 OCR 처리 후 추가하세요.
+- PDF 분석은 저장한 본문으로 진행하며, 공개 논문·공식 코드의 동일성이 확인되지 않으면 확인 불가로 남깁니다. 분석·번역은 Codex에 본문을 전달하고 사용량을 소비합니다.
+- 파일과 추출 결과는 현재 프로필의 `data/research/uploads`에 보관합니다. 연구 라이브러리를 수동 백업할 때 `data/research` 전체를 포함하세요. 기존 `/api/backup`은 구형 라이브러리 백업이므로 연구 라이브러리 전체 백업을 대신하지 않습니다.
+
+검증: `python -m unittest discover -s tests -p test_pdf_import.py`, `node tests/pdf-import-ui.cjs` (Playwright Chrome 필요, 격리된 임시 데이터, AI 호출 없음).

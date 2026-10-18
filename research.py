@@ -155,6 +155,54 @@ def add(value):
                 break
         return save(p)
 
+
+PDF_LIMIT = 24 * 1024 * 1024
+
+def local_pdf_path(p):
+    digest=p.get('pdf_sha256','')
+    if not isinstance(digest,str) or not re.fullmatch('[a-f0-9]{64}',digest):raise ValueError('저장된 PDF 식별자가 잘못되었습니다.')
+    return DATA/'uploads'/(digest+'.pdf')
+
+def add_pdf(payload):
+    import base64,binascii
+    from pypdf import PdfReader
+    encoded=payload.get('content','')
+    if not isinstance(encoded,str) or len(encoded)>4*((PDF_LIMIT+2)//3):raise ValueError('PDF는 24MB 이하만 지원합니다.')
+    try:raw=base64.b64decode(encoded,validate=True)
+    except (ValueError,binascii.Error):raise ValueError('PDF 전송 데이터가 잘못되었습니다.')
+    if len(raw)>PDF_LIMIT or not raw.startswith(b'%PDF-'):raise ValueError('유효한 PDF 파일을 선택하세요. 최대 24MB입니다.')
+    digest=hashlib.sha256(raw).hexdigest();identity='pdf:'+digest
+    with LOCK:
+        for existing in all_records():
+            if existing['identity']==identity:return existing
+    try:
+        pdf=PdfReader(io.BytesIO(raw))
+        if pdf.is_encrypted:raise ValueError('암호화된 PDF는 잠금을 해제한 뒤 추가하세요.')
+        if not 0<len(pdf.pages)<=500:raise ValueError('PDF는 1–500쪽만 지원합니다.')
+        pages=[];total=0
+        for page in pdf.pages:
+            text=page.extract_text() or '';total+=len(text)
+            if total>2000000:raise ValueError('PDF 추출 본문은 200만 자 이하만 지원합니다.')
+            pages.append(text)
+        meta=pdf.metadata or {}
+    except ValueError:raise
+    except Exception:raise ValueError('PDF를 읽을 수 없습니다. 손상 여부를 확인하세요.')
+    filename=Path(str(payload.get('filename','paper.pdf')).replace('\\','/')).name[:240]
+    title=str(payload.get('title') or meta.get('/Title') or Path(filename).stem).strip()[:500] or '제목 없는 PDF'
+    author=str(meta.get('/Author') or '').strip()[:500]
+    p={'id':uuid.uuid4().hex,'identity':identity,'title':title,'authors':[author] if author else [],'year':'','url':'','arxiv':'','abstract':'','status':'ready','source':'PDF','captured':now(),'notes':'','chat':[],'reports':[],'references':[], 'pdf_sha256':digest,'pdf_filename':filename,'pdf_pages':len(pages),'pdf_text_chars':total,'pdf_extraction':'text' if total>=1500 else 'needs_ocr'}
+    with LOCK:
+        for existing in all_records():
+            if existing['identity']==identity:return existing
+        path=local_pdf_path(p);path.parent.mkdir(parents=True,exist_ok=True)
+        for target,data in [(path,raw),(path.with_suffix('.json'),json.dumps({'pages':pages},ensure_ascii=False).encode())]:
+            temp=target.with_suffix('.'+uuid.uuid4().hex+'.tmp');temp.write_bytes(data);temp.replace(target)
+        return save(p)
+
+def local_pdf_pages(p):
+    return json.loads(local_pdf_path(p).with_suffix('.json').read_text())['pages']
+
+
 def state():
     records=all_records(); fields=('id','title','status','authors','year','url','arxiv','source','updated','category','openalex','doi')
     with db() as c: meta={r[0]:json.loads(r[1]) for r in c.execute('SELECT * FROM meta')}
@@ -206,6 +254,15 @@ def bibliography(article,aid):
     return refs
 
 def collect(p,run):
+    if p.get('pdf_sha256'):
+        raw=local_pdf_path(p).read_bytes();pages=local_pdf_pages(p)
+        text='\n\n'.join('[p.'+str(i+1)+']\n'+page for i,page in enumerate(pages))
+        if sum(len(page.strip()) for page in pages)<1500:raise ValueError('분석할 본문이 부족합니다. 스캔 PDF는 OCR 처리 후 다시 추가하세요. 원본 PDF는 보존되어 있습니다.')
+        (run/'paper.pdf').write_bytes(raw)
+        (run/'paper-pdf.txt').write_text(text);(run/'paper.txt').write_text(text)
+        sources=[{'kind':'pdf','url':'/api/research/pdf/'+p['id'],'sha256':p['pdf_sha256'],'retrieved':now(),'extraction':'PDF text; layout, equations and tables require original-page verification'}]
+        (run/'sources.json').write_text(json.dumps(sources,ensure_ascii=False,indent=2))
+        return text,[],sources
     aid=p['arxiv']; sources=[]; refs=[];html='';text=''
     try:
         html=fetch('https://arxiv.org/html/'+aid).decode('utf-8','replace')
@@ -344,11 +401,11 @@ def run_analysis(jid,pid):
             with LOCK: JOBS[jid]['status']='running'
             p=get(pid);run=DATA/'runs'/jid;run.mkdir(parents=True)
             text,refs,sources=collect(p,run)
-            figures=collect_figures(p['arxiv'],run)
+            figures=collect_figures(p['arxiv'],run) if p.get('arxiv') else []
             with LOCK:
                 p=get(pid);p.update(references=refs,sources=sources,last_run=jid,figures=figures,citation_context=citation_context(run));save(p)
             mark(jid,'discovery','공식 코드·저자 소속·연구실·최근 연구 확인')
-            prompt=RESEARCH_RULES+'\nToday: '+now()+'''\nRead paper.txt and paper-pdf.txt in this directory. Search the web for the paper official project/code and author/lab pages, then recent lab works (last 24 months as of today). You must actually open primary URLs. Return ONLY JSON with keys:
+            prompt=RESEARCH_RULES+'\nToday: '+now()+'''\nRead paper.txt and paper-pdf.txt in this directory. A local uploaded PDF may have no arXiv or public URL. Never substitute a similar-titled paper or infer an official repository from its name; verify exact identity first. PDF text extraction is not recovered TeX; equations, tables and reading order may be incomplete. Preserve unknowns. Search the web for the paper official project/code and author/lab pages, then recent lab works (last 24 months as of today). You must actually open primary URLs. Return ONLY JSON with keys:
 {"code":{"url":"official GitHub root or empty","evidence_url":"paper/project page linking repo","reason":""},"project_urls":[],"affiliations":[{"author":"","paper_affiliation":"","current_affiliation":"확인 불가 if unknown","lab":"확인 불가 if unknown","evidence_urls":[],"note":""}],"recent_work":[{"title":"","url":"primary paper URL","date":"YYYY-MM or explicit unknown","lab":"","relationship":"why connected; no unproven membership","evidence_url":"lab publication page"}],"limitations":[]}
 No guesses. No project URL means no official repository claim. This is single paper enrichment, not a topic survey. Paper: '''+json.dumps({k:p.get(k) for k in ('title','url','authors')},ensure_ascii=False)
             discovery=parse_json(cli(jid,prompt,run,'discovery'))
@@ -431,7 +488,8 @@ def review_draft(jid,run):
 
 def start(pid):
     p=get(pid)
-    if not p.get('arxiv'): raise ValueError('먼저 arXiv 원문을 선택하세요. 제목만 있는 후보를 분석 완료로 처리하지 않습니다.')
+    if not p.get('arxiv') and not p.get('pdf_sha256'): raise ValueError('먼저 arXiv 원문 또는 PDF를 추가하세요. 제목만 있는 후보를 분석 완료로 처리하지 않습니다.')
+    if p.get('pdf_sha256') and p.get('pdf_extraction')=='needs_ocr':raise ValueError('분석할 본문이 부족합니다. OCR 처리된 PDF를 추가하세요. 원본은 PDF 탭에서 읽을 수 있습니다.')
     with LOCK:
         active=[j for j in JOBS.values() if j['status'] in ('queued','running')]
         if any(j['paper_id']==pid for j in active): raise ValueError('이 논문을 이미 분석 중입니다.')

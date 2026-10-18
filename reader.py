@@ -25,6 +25,19 @@ def folder(pid):
 def document(pid):
     p,path=folder(pid);cache=path/'document.json'
     if cache.exists():return json.loads(cache.read_text())
+    if p.get('pdf_sha256'):
+        pages=R.local_pdf_pages(p)
+        article=BeautifulSoup('<article></article>','html.parser').article;toc=[]
+        for i,text in enumerate(pages):
+            section=BeautifulSoup('<section></section>','html.parser').section
+            heading=BeautifulSoup('<h2></h2>','html.parser').h2;heading['id']='original-page-'+str(i+1);heading.string='PDF · '+str(i+1)+'쪽';section.append(heading)
+            toc.append({'id':heading['id'],'title':heading.string})
+            for paragraph in re.split(r'\n\s*\n',text):
+                if paragraph.strip():
+                    node=BeautifulSoup('<p></p>','html.parser').p;node.string=paragraph.strip();section.append(node)
+            article.append(section)
+        text=article.get_text();doc={'html':str(article),'text':text,'version':hashlib.sha256(text.encode()).hexdigest(),'source':'/api/research/pdf/'+pid,'toc':toc,'assets':[],'retrieved':R.now(),'format':'pdf-text','notice':'PDF에서 추출한 본문입니다. 단·수식·표의 순서가 원본과 다를 수 있습니다. 정확한 배치는 PDF 탭에서 확인하세요.'}
+        temp=cache.with_suffix('.'+uuid.uuid4().hex+'.tmp');temp.write_text(json.dumps(doc,ensure_ascii=False));temp.replace(cache);return doc
     if not p.get('arxiv'):raise ValueError('원문을 먼저 확인하세요.')
     base='https://arxiv.org/html/'+p['arxiv'];run=p.get('last_run','');source=R.DATA/'runs'/run/'paper.html'
     raw=source.read_text() if re.fullmatch('[a-f0-9]{32}',run) and source.exists() else R.fetch(base).decode('utf-8','replace')
