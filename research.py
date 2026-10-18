@@ -466,6 +466,31 @@ def normalize_walkthrough(value, sources):
     if not isinstance(value,dict):return result
     result.update(title=text(value.get('title'),200),scope=text(value.get('scope'),2000))
     allowed={url(s.get('url')) for s in (sources if isinstance(sources,list) else []) if isinstance(s,dict)}-{''}
+    def normalize_evidence(value):
+        evidence=[];urls=set()
+        for item in (value if isinstance(value,list) else [])[:20]:
+            if not isinstance(item,dict):continue
+            link=url(item.get('url'))
+            if not link or link not in allowed or link in urls:continue
+            evidence.append({'label':text(item.get('label'),200) or '근거','url':link});urls.add(link)
+        return evidence
+    def normalize_mechanics(value):
+        result=[]
+        for item in (value if isinstance(value,list) else [])[:12]:
+            if not isinstance(item,dict):continue
+            fields={key:text(item.get(key),limit) for key,limit in (
+                ('title',200),('explanation',6000),('input_shape',1000),('output_shape',1000),
+                ('equation',4000),('assumptions',2000))}
+            if not fields['title'] or not fields['explanation']:continue
+            evidence=normalize_evidence(item.get('evidence'))
+            basis=item.get('basis')
+            if basis not in ('code','mathematical','illustrative','unknown'):basis='unknown'
+            if basis=='code' and not evidence:basis='unknown'
+            if not fields['input_shape'] or not fields['output_shape']:basis='unknown'
+            fields['input_shape']=fields['input_shape'] or '확인 불가'
+            fields['output_shape']=fields['output_shape'] or '확인 불가'
+            result.append({**fields,'basis':basis,'evidence':evidence})
+        return result
     seen=set()
     for step in (value.get('steps') if isinstance(value.get('steps'),list) else [])[:40]:
         if not isinstance(step,dict):continue
@@ -476,12 +501,7 @@ def normalize_walkthrough(value, sources):
         if not re.fullmatch(r'[A-Za-z0-9_-]{1,100}',ident) or ident in seen:ident=f'step-{len(result["steps"])+1}'
         while ident in seen:ident+='-next'
         seen.add(ident)
-        evidence=[];urls=set()
-        for item in (step.get('evidence') if isinstance(step.get('evidence'),list) else [])[:20]:
-            if not isinstance(item,dict):continue
-            link=url(item.get('url'))
-            if not link or link not in allowed or link in urls:continue
-            evidence.append({'label':text(item.get('label'),200) or '근거','url':link});urls.add(link)
+        evidence=normalize_evidence(step.get('evidence'))
         input_shape=text(step.get('input_shape'),1000)
         output_shape=text(step.get('output_shape'),1000)
         mode=step.get('mode')
@@ -493,7 +513,7 @@ def normalize_walkthrough(value, sources):
             'operation':text(step.get('operation'),2000),'input_shape':input_shape or '확인 불가',
             'output_shape':output_shape or '확인 불가','equation':text(step.get('equation'),4000),
             'mode':mode if mode in ('training','inference','shared') else 'shared',
-            'evidence':evidence,'verification':verification,
+            'evidence':evidence,'verification':verification,'mechanics':normalize_mechanics(step.get('mechanics')),
             'concepts':list(dict.fromkeys(text(c,120) for c in (step.get('concepts') if isinstance(step.get('concepts'),list) else [])[:8] if text(c,120)))})
     return result
 
@@ -526,7 +546,7 @@ def normalize_model_graph(value, sources):
 
 def review_draft(jid,run):
     try:
-        value=parse_json(cli(jid,RESEARCH_RULES+'''\nReview draft.json against paper.txt, paper-pdf.txt, discovery.json and code-status.json; inspect code if present. Check numeric results/table settings, equations and symbol definitions, claims vs evidence, actual code snippets/commit anchors, related-work relation types and model_graph adoption evidence, every tensor_trace reshape/matmul/broadcast/mask and train-versus-inference path, experiment-to-module linkage, walkthrough step shapes and source anchors (source means cited, not executed), affiliation vs lab, dates, and unknowns. Do not mark missing facts as verified. Return ONLY {"verdict":"pass|needs_review","issues":["specific issue"],"corrections":[{"section":"tldr|eli5|overview|method|experiments|code|labs|limitations|related_work|tensor_trace","replacement":"complete corrected section Markdown"}]}. Apply all corrections you can support. No fabrication. Missing official code is a limitation, not a reason to invent code. This is single paper, not full survey completion.''',run,'review',timeout=600))
+        value=parse_json(cli(jid,RESEARCH_RULES+'''\nReview draft.json against paper.txt, paper-pdf.txt, discovery.json and code-status.json; inspect code if present. Check numeric results/table settings, equations and symbol definitions, claims vs evidence, actual code snippets/commit anchors, related-work relation types and model_graph adoption evidence, every tensor_trace reshape/matmul/broadcast/mask and train-versus-inference path, experiment-to-module linkage, walkthrough step shapes and mechanics (axis-wise derivations, broadcasting, masks, gradient flow, explicit assumptions and code vs mathematical vs illustrative basis), source anchors (source means cited, not executed), affiliation vs lab, dates, and unknowns. Do not mark missing facts as verified. Return ONLY {"verdict":"pass|needs_review","issues":["specific issue"],"corrections":[{"section":"tldr|eli5|overview|method|experiments|code|labs|limitations|related_work|tensor_trace","replacement":"complete corrected section Markdown"}]}. Apply all corrections you can support. No fabrication. Missing official code is a limitation, not a reason to invent code. This is single paper, not full survey completion.''',run,'review',timeout=600))
         if not isinstance(value,dict) or value.get('verdict') not in ('pass','needs_review') or not isinstance(value.get('issues'),list) or not isinstance(value.get('corrections',[]),list):raise ValueError('검수 응답 형식 오류')
         if any(not isinstance(f,dict) for f in value.get('corrections',[])):raise ValueError('검수 수정 형식 오류')
         return value

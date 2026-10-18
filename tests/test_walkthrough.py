@@ -10,7 +10,7 @@ class WalkthroughTests(unittest.TestCase):
                 'operation':'permute(0,4,1,2,3)','input_shape':'[B,T,H,W,C]',
                 'output_shape':'[B,C,T,H,W]','equation':'','mode':'shared',
                 'verification':'source','evidence':[{'url':self.source,'label':'model.py'}],
-                'concepts':['Video Latents'],**changes}
+                'concepts':['Video Latents'],'mechanics':[],**changes}
 
     def normalize(self, steps, sources=None):
         return R.normalize_walkthrough({'title':'Trace','scope':'Static code inspection','steps':steps},
@@ -61,3 +61,41 @@ class WalkthroughTests(unittest.TestCase):
     def test_illustration_never_promoted_by_citation(self):
         step=self.normalize([self.step(verification='illustrative')])['steps'][0]
         self.assertEqual(step['verification'],'illustrative')
+
+    def mechanic(self, **changes):
+        return {'title':'Contraction','explanation':'Sum the Din axis',
+                'input_shape':'A:[B,N,Din], W:[Din,Dout]','output_shape':'[B,N,Dout]',
+                'equation':'Y[b,n,j] = sum_k A[b,n,k] W[k,j]',
+                'assumptions':'Real-valued matrix multiplication','basis':'mathematical',
+                'evidence':[],**changes}
+
+    def test_mathematical_mechanics_need_no_source_but_code_does(self):
+        math=self.mechanic()
+        code=self.mechanic(basis='code')
+        cited=self.mechanic(basis='code',evidence=[{'url':self.source,'label':'code'}])
+        steps=self.normalize([self.step(mechanics=[math,code,cited])])['steps'][0]['mechanics']
+        self.assertEqual(steps[0],math)
+        self.assertEqual(steps[1]['basis'],'unknown')
+        self.assertEqual(steps[2],cited)
+        self.assertEqual(steps[0]['assumptions'],'Real-valued matrix multiplication')
+
+    def test_mechanics_payloads_and_untrusted_sources_are_safe(self):
+        for invalid in (None,[],{},True,42):
+            step=self.normalize([self.step(mechanics=invalid)])['steps'][0]
+            self.assertEqual(step['mechanics'],[])
+            for field in ('basis','input_shape','output_shape','equation','assumptions','evidence'):
+                mechanics=self.normalize([self.step(mechanics=[self.mechanic(**{field:invalid})])])['steps'][0]['mechanics']
+                self.assertEqual(len(mechanics),1)
+                if field in ('input_shape','output_shape'):
+                    self.assertEqual(mechanics[0][field],'확인 불가')
+                    self.assertEqual(mechanics[0]['basis'],'unknown')
+        item=self.mechanic(basis='code',evidence=[{'url':'https://unread.org'}])
+        self.assertEqual(self.normalize([self.step(mechanics=[item])])['steps'][0]['mechanics'][0]['basis'],'unknown')
+
+    def test_mechanics_bounds_and_illustration_basis(self):
+        item=self.mechanic(title='a\x00b',explanation='e'*7000,basis='illustrative')
+        mechanics=self.normalize([self.step(mechanics=[item]*100)])['steps'][0]['mechanics']
+        self.assertEqual(len(mechanics),12)
+        self.assertEqual(mechanics[0]['title'],'ab')
+        self.assertEqual(len(mechanics[0]['explanation']),6000)
+        self.assertEqual(mechanics[0]['basis'],'illustrative')
