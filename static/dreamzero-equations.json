@@ -1,0 +1,229 @@
+{
+  "arxiv": "2602.15922",
+  "checked": "2026-10-18",
+  "scope": "원문 식과 고정 커밋 코드에 근거한 해설. GPU 실행 검증 아님.",
+  "equations": [
+    {
+      "anchor": "original-S3.E1",
+      "math_id": "original-S3.E1.m1",
+      "title": "식 (1) · 미래 영상과 행동을 함께 예측하는 이유",
+      "original_latex": "\\underbrace{\\pi_{0}(\\mathbf{o}_{l:l+H},\\mathbf{a}_{l:l+H}\\mid\\mathbf{o}_{0:l},\\mathbf{c},\\mathbf{q}_{l})}_{\\mbox{{DreamZero}}}=\\underbrace{\\pi_{0}(\\mathbf{o}_{l:l+H}\\mid\\mathbf{o}_{0:l},\\mathbf{c},\\mathbf{q}_{l})}_{\\text{video prediction}}\\underbrace{\\pi_{0}(\\mathbf{a}_{l:l+H}\\mid\\mathbf{o}_{0:l+H},\\mathbf{q}_{l})}_{\\text{IDM}}",
+      "sections": [
+        {
+          "title": "한 문장으로",
+          "text": "현재까지 본 영상·언어 지시·몸 상태를 주고 앞으로의 영상과 행동을 함께 예측한다. 미래가 어떻게 보일지와 그 미래를 만드는 행동은 연관되어 있으므로 공동 분포로 표현한다. 이 식은 확률 모델의 분해이며 두 모델을 순서대로 실행했다는 기록이 아니다."
+        },
+        {
+          "title": "기호와 역할",
+          "text": "l은 trajectory에서 선택한 시점, H>0는 예측 horizon이다. o는 관측 영상, a는 행동, c는 언어 지시, q_l은 현재 proprioceptive 상태다. π₀ 표기는 이 논문의 분포 기호로 읽으며 식 (2)의 noise endpoint 아래첨자0과 혼동하지 않는다. 정확한 tensor 길이나 index endpoint 포함 여부를 이 구간 표기만으로 단정하지 않는다."
+        },
+        {
+          "title": "확률 곱셈 법칙에서 시작",
+          "text": "X를 미래 영상, Y를 미래 행동, C를 현재 조건 묶음이라 두면 조건부 확률의 chain rule을 적용할 수 있다. 우선 영상의 가능성을 정하고 그 영상을 포함한 조건에서 행동의 가능성을 표현하는 분해다. 공동 예측의 두 항은 서로 독립이라는 뜻이 아니다.",
+          "latex": "p(X,Y\\mid C)=p(X\\mid C)p(Y\\mid X,C)"
+        },
+        {
+          "title": "논문 표기와 일반 chain rule의 차이",
+          "text": "논문 두 번째 IDM 항은 전체 관측 o_{0:l+H}와 q_l을 조건으로 쓰고 c를 명시하지 않는다. 일반 chain rule만으로 언어 조건을 지울 수 있는 것은 아니다. 완전한 조건부 확률 등식으로 해석하려면 영상·상태가 주어졌을 때 행동이 추가 언어 정보에 의존하지 않는다는 가정 또는 그에 해당하는 모델링이 필요하다. 본문은 이를 IDM 분해로 제시한다. 별도 독립성 검정을 수행했다는 근거는 확인할 수 없다.",
+          "latex": "p(Y\\mid X,C)=p(Y\\mid o_{0:l+H},q_l)\\quad\\text{requires a modeling assumption}"
+        },
+        {
+          "title": "숫자로 곱해 보기 · 교육용",
+          "text": "연속 영상 대신 장난감 이산 사건으로, 주어진 조건에서 특정 미래 장면 확률0.4, 그 장면이 주어졌을 때 특정 행동 확률0.25라면 두 사건이 함께 나타날 확률은0.1이다. 실제 영상·행동은 연속값이므로 밀도와 사건 확률을 구분해야 하며, 이 숫자는 DreamZero의 측정 확률이 아니다.",
+          "latex": "0.4\\times0.25=0.1"
+        },
+        {
+          "title": "실제 구현으로 넘어갈 때",
+          "text": "본문은 영상 예측기와 IDM을 각각 따로 훈련하는 대신 단일 모델을 end-to-end 공동 학습한다고 명시한다. 식 (1)의 확률 곱을 텐서 원소끼리 곱하는 연산으로 구현한다고 해석하면 안 된다. 이후 식 (2)·(3)이 noisy 영상·행동과 속도 회귀 loss를 통해 공동 학습을 구체화한다."
+        }
+      ],
+      "sources": [
+        {
+          "label": "DreamZero 식 (1)과 직후 본문",
+          "url": "https://arxiv.org/html/2602.15922#S3.E1"
+        }
+      ]
+    },
+    {
+      "anchor": "original-S3.E2",
+      "math_id": "original-S3.E2.m1",
+      "title": "식 (2) · 잡음과 정답 사이의 한 지점 만들기",
+      "original_latex": "\\mathbf{z}_{t_{k}}^{k}=t_{k}\\mathbf{z}_{1}^{k}+(1-t_{k})\\mathbf{z}_{0}^{k},\\quad\\mathbf{a}_{t_{k}}^{k}=t_{k}\\mathbf{a}_{1}^{k}+(1-t_{k})\\mathbf{a}_{0}^{k},",
+      "sections": [
+        {
+          "title": "한 문장으로",
+          "text": "정답 영상 잠재값과 행동에 잡음을 섞어 중간 상태를 만든다. 모델은 이 중간 상태에서 정답으로 가는 방향을 배우게 된다. 여기서 시간 t는 로봇의 실제 시각이 아니라 잡음 혼합 정도를 나타내는 좌표다."
+        },
+        {
+          "title": "기호부터 구분",
+          "text": "k는 시간 순서의 청크, z는 VAE 영상 잠재값, a는 정규화 행동이다. 아래첨자 0은 Gaussian 잡음, 1은 깨끗한 정답이다. 같은 청크의 프레임은 t_k를 공유하고, 다른 청크는 독립적인 t_k를 사용한다. 위첨자 k는 거듭제곱이 아니다.",
+          "latex": "\\mathbf z_0^k,\\mathbf a_0^k\\sim\\mathcal N(0,I),\\quad t_k\\in[0,1]"
+        },
+        {
+          "title": "선형 보간을 전개",
+          "text": "두 끝점을 더하는 비율의 합은 1이다. t=0이면 잡음만, t=1이면 정답만 남는다. 벡터·텐서 각 원소에 같은 식이 적용된다. t를 늘릴 때 잡음에서 데이터 쪽으로 움직인다.",
+          "latex": "x_t=t x_1+(1-t)x_0=x_0+t(x_1-x_0)"
+        },
+        {
+          "title": "속도 정답이 나오는 이유",
+          "text": "끝점 x_0,x_1을 고정하고 혼합 좌표 t에 대해 미분하면 직선 경로의 기울기는 상수 x_1−x_0다. 미분은 신경망 파라미터 θ에 대한 미분과 구분해야 한다.",
+          "latex": "\\frac{d x_t}{dt}=x_1-x_0"
+        },
+        {
+          "title": "텐서 내부에서 일어나는 일",
+          "text": "영상 학습에서 샘플 축을 펼친 입력은 [B·F,Cz,h,w]이며, 프레임별 혼합 계수 [B·F]에 singleton 축을 붙여 [B·F,1,1,1]로 broadcast한다. 행동은 [B·A,da]와 [B·A,1]의 조합이다. 섞기 전후 shape는 같다. F는 잠재 프레임 수이고 A는 행동 horizon이므로 두 길이가 같다고 가정하지 않는다.",
+          "latex": "y[n,c,i,j]=(1-\\sigma[n])x[n,c,i,j]+\\sigma[n]\\epsilon[n,c,i,j]"
+        },
+        {
+          "title": "계산해 보기 · 교육용 숫자",
+          "text": "실제 모델 값이 아닌 2차원 예제: 정답 x_1=[2,−1], 잡음 x_0=[−2,3], t=0.25라 하자. x_t=0.25[2,−1]+0.75[−2,3]=[−1,2]. 정답 속도는 [4,−4]. t를 0.1 늘리면 [−1,2]+0.1[4,−4]=[−0.6,1.6]이다.",
+          "latex": "x_{0.35}=[-0.6,1.6]"
+        },
+        {
+          "title": "논문 t와 코드 σ는 방향이 반대",
+          "text": "확인한 scheduler는 (1−σ)·data+σ·noise를 계산하고 training_target=noise−data를 반환한다. 논문의 t=1−σ로 대응하면 같은 중간 샘플을 얻지만 속도 부호는 반대다. 위 예제에서 σ=0.75, 코드 target=[−4,4]다. σ를 −0.1만큼 줄이면 똑같이 [−0.6,1.6]으로 간다. 코드 timestep 인수는 scheduler가 sigma를 조회하기 위한 값이며 그 자체를 논문의 t라고 놓으면 안 된다.",
+          "latex": "\\sigma=1-t,\\quad\\frac{dx}{d\\sigma}=-\\frac{dx}{dt}=x_0-x_1"
+        }
+      ],
+      "sources": [
+        {
+          "label": "DreamZero 원문 해당 식",
+          "url": "https://arxiv.org/html/2602.15922#S3.E2"
+        },
+        {
+          "label": "고정 커밋 코드",
+          "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/flow_match_scheduler.py#L73-L95"
+        }
+      ]
+    },
+    {
+      "anchor": "original-S3.E3",
+      "math_id": "original-S3.E3.m1",
+      "title": "식 (3) · 예측 속도가 정답 방향과 얼마나 다른가",
+      "original_latex": "\\mathcal{L}(\\theta)=\\mathbb{E}_{\\mathbf{z},\\mathbf{a},\\{t_{k}\\}}\\Bigg[\\frac{1}{K}\\sum_{k=1}^{K}w(t_{k})\\big\\lVert\\mathbf{u}_{\\theta}([\\mathbf{z}_{t_{k}}^{k},\\mathbf{a}_{t_{k}}^{k}];\\mathcal{C}_{k},\\mathbf{c},\\mathbf{q}_{k},t_{k})-\\mathbf{v}^{k}\\big\\rVert^{2}\\Bigg],",
+      "sections": [
+        {
+          "title": "한 문장으로",
+          "text": "잡음을 섞은 영상·행동과 문맥을 모델에 주고, 모델이 예측한 이동 방향을 정답 직선 방향과 비교한다. 여러 청크·데이터·잡음 수준에서 이 오차가 작아지도록 θ를 학습한다."
+        },
+        {
+          "title": "입력과 조건을 분리",
+          "text": "u_θ는 학습할 속도 예측기다. [z_t^k,a_t^k]는 공동 영상·행동 표기이며 서로 다른 rank의 원시 텐서를 무조건 같은 축에 concat한다는 뜻은 아니다. C_k는 앞 청크의 깨끗한 문맥, c는 텍스트, q_k는 proprioceptive 상태다. K는 평가하는 청크 수이고 w(t_k)>0는 잡음 수준별 가중치다. 현재·미래 정답 접근은 attention mask가 제한한다."
+        },
+        {
+          "title": "제곱 노름을 원소별로 풀기",
+          "text": "r=u_θ−v를 잔차라고 하면 제곱 Euclidean 노름은 각 원소 잔차의 제곱을 합한 값이다. 영상과 행동을 개념적으로 펼친 공동 벡터라면 각 modality 오차의 합으로 나눌 수 있다. 실제 구현의 평균·가중치·mask는 별도로 추적해야 한다.",
+          "latex": "\\|u_\\theta-v\\|^2=\\sum_i(u_{\\theta,i}-v_i)^2"
+        },
+        {
+          "title": "정답 v는 어디서 오는가",
+          "text": "식 (2)의 직선 보간을 미분하면 논문의 정답은 [z_1,a_1]−[z_0,a_0]다. 코드 scheduler는 반대 방향 좌표 σ를 사용하므로 noise−data를 target으로 쓴다. 논문 방향의 v를 코드 출력과 그대로 비교하면 부호를 잘못 판단한다.",
+          "latex": "v^k=[z_1^k,a_1^k]-[z_0^k,a_0^k],\\quad v_\\sigma=-v_t"
+        },
+        {
+          "title": "기댓값은 매번 무엇을 평균내는가",
+          "text": "E는 데이터와 청크별 t를 뽑는 학습 분포에 대한 평균이다. 구현에서는 유한 minibatch 표본으로 추정한다. Gaussian 잡음도 새로 샘플링된다. 논문에 적힌 기댓값 첨자가 모든 난수 변수를 열거한다고 단정하지 않는다. 1/K는 청크 평균이며 optimizer step 횟수가 아니다.",
+          "latex": "\\widehat L=\\frac1M\\sum_{m=1}^{M}\\frac1K\\sum_{k=1}^{K}w(t_{m,k})\\|u_\\theta-v\\|^2"
+        },
+        {
+          "title": "코드의 영상·행동 reduction",
+          "text": "영상 prediction/target은 [B,Cz,F,h,w]이고 reduction=none MSE 뒤 dim=(1,3,4)를 평균하여 [B,F]를 남긴다. 프레임별 training_weight를 곱한 뒤 전체 평균한다. 행동은 [B,A,da] 원소별 MSE에 action_mask와 has_real_action을 적용하고 da축 평균, timestep 가중치, 전체 평균을 거친다. 두 scalar를 더한다. 유효 mask 수로 나누는 평균이 아니다.",
+          "latex": "L_{\\rm video}=\\operatorname{mean}_{b,f}\\!\\left[w_{bf}\\operatorname{mean}_{c,i,j}(\\hat v-v)^2\\right]"
+        },
+        {
+          "title": "숫자로 loss 계산 · 교육용",
+          "text": "한 청크, w=2, 정답 v=[4,−4], 예측 u=[3,−2]라는 예제를 사용한다. 잔차=[−1,2], 원소별 제곱=[1,4], 제곱 노름=5, 가중 loss=10이다. 평균 MSE라면 5/2=2.5이고 가중 후5다. 이 차이는 오류가 아니라 합과 평균이라는 reduction 정의 차이다. 실제 영상·행동 크기나 측정 loss가 아니다.",
+          "latex": "2\\left((3-4)^2+(-2+4)^2\\right)=10"
+        },
+        {
+          "title": "역전파 방향을 직접 보기",
+          "text": "위 가중 제곱합에 대해 예측값 u의 gradient는 2w(u−v)=[−4,8]이다. 학습률0.1의 예시 업데이트를 u 자체에 적용하면 [3.4,−2.8]로 정답에 가까워진다. 실제 학습은 u를 직접 저장·수정하는 것이 아니라 chain rule로 θ를 optimizer가 수정한다.",
+          "latex": "\\nabla_\\theta L=J_{u_\\theta}^{\\mathsf T}\\,2w(u_\\theta-v)"
+        },
+        {
+          "title": "실행 검증 범위",
+          "text": "이 해설은 고정 커밋의 forward·scheduler를 읽어 전개했다. 실제 GPU 학습·로봇 실험을 실행하거나 gradient tensor를 측정하지 않았다. 정확한 배치·시간 길이·로봇별 단위는 선택 데이터와 resolved config 없이는 확인할 수 없다."
+        }
+      ],
+      "sources": [
+        {
+          "label": "DreamZero 원문 해당 식",
+          "url": "https://arxiv.org/html/2602.15922#S3.E3"
+        },
+        {
+          "label": "고정 커밋 코드",
+          "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L737-L803"
+        }
+      ]
+    },
+    {
+      "anchor": "original-A4.E4",
+      "math_id": "original-A4.E4.m1",
+      "title": "식 (4) · 영상과 행동이 같은 잡음 시계를 사용",
+      "original_latex": "t_{k}^{\\text{video}}=t_{k}^{\\text{action}}=t_{k},\\quad t_{k}\\sim\\mathcal{U}(0,1)",
+      "sections": [
+        {
+          "title": "의미와 계산",
+          "text": "기본 결합 schedule에서는 청크마다 t를 Uniform(0,1)에서 하나 뽑아 영상·행동이 공유한다. 같은 혼합 비율이지 두 modality의 값·차원이 같다는 뜻은 아니다. 교육용 t=0.3이면 각 modality의 정답30%와 자체 잡음70%를 섞는다.",
+          "latex": "t^{video}_k=t^{action}_k=t_k\\sim\\mathcal U(0,1)"
+        },
+        {
+          "title": "시간 방향 주의",
+          "text": "이 식의 t=0은 잡음, t=1은 데이터다. 확인한 코드의 sigma는 반대이므로 sigma=1−t로 대응한다. 각 숫자는 분포·보간을 설명하는 값이며 실제 activation 측정치가 아니다."
+        }
+      ],
+      "sources": [
+        {
+          "label": "DreamZero 원문 해당 식",
+          "url": "https://arxiv.org/html/2602.15922#A4.E4"
+        }
+      ]
+    },
+    {
+      "anchor": "original-A4.E5",
+      "math_id": "original-A4.E5.m1",
+      "title": "식 (5) · Flash는 영상에 더 많은 잡음을 남기도록 학습",
+      "original_latex": "t_{k}^{\\text{video}}=1-\\eta,\\quad\\eta\\sim\\text{Beta}(\\alpha,\\beta),\\quad t_{k}^{\\text{action}}\\sim\\mathcal{U}(0,1)",
+      "sections": [
+        {
+          "title": "의미와 계산",
+          "text": "본문은 α>β, 예를 들어 α=7,β=1을 제시한다. η가 1 근처에 몰리므로 t_video=1−η는0 근처가 되어 영상이 더 noisy하다. E[η]=α/(α+β), 따라서 예시 E[t_video]=1/8이다. 행동 t는 별도 Uniform으로 유지한다. 이 분포 설명은 해당 실험의 모든 config가 반드시7,1이라는 주장이 아니다.",
+          "latex": "\\mathbb E[t^{video}]=1-\\frac\\alpha{\\alpha+\\beta}=\\frac\\beta{\\alpha+\\beta}"
+        },
+        {
+          "title": "시간 방향 주의",
+          "text": "이 식의 t=0은 잡음, t=1은 데이터다. 확인한 코드의 sigma는 반대이므로 sigma=1−t로 대응한다. 각 숫자는 분포·보간을 설명하는 값이며 실제 activation 측정치가 아니다."
+        }
+      ],
+      "sources": [
+        {
+          "label": "DreamZero 원문 해당 식",
+          "url": "https://arxiv.org/html/2602.15922#A4.E5"
+        }
+      ]
+    },
+    {
+      "anchor": "original-A4.E6",
+      "math_id": "original-A4.E6.m1",
+      "title": "식 (6) · 서로 다른 시계로 영상과 행동을 보간",
+      "original_latex": "\\mathbf{z}_{t_{k}^{\\text{video}}}^{k}=t_{k}^{\\text{video}}\\mathbf{z}_{1}^{k}+(1-t_{k}^{\\text{video}})\\mathbf{z}_{0}^{k},\\quad\\mathbf{a}_{t_{k}^{\\text{action}}}^{k}=t_{k}^{\\text{action}}\\mathbf{a}_{1}^{k}+(1-t_{k}^{\\text{action}})\\mathbf{a}_{0}^{k}",
+      "sections": [
+        {
+          "title": "의미와 계산",
+          "text": "식 (2)의 각 modality에 독립적인 t_video,t_action을 넣는다. 교육용으로 영상 t=0.1, 행동 t=0.8이면 영상은 정답10%+잡음90%, 행동은 정답80%+잡음20%다. 공동 모델이 noisy 영상 상태에서도 깨끗한 행동을 추정하도록 훈련할 수 있게 하는 schedule이다. 추론 solver의 업데이트 규칙과 동일한 식으로 혼동하지 않는다.",
+          "latex": "z=t^{video}z_1+(1-t^{video})z_0,\\quad a=t^{action}a_1+(1-t^{action})a_0"
+        },
+        {
+          "title": "시간 방향 주의",
+          "text": "이 식의 t=0은 잡음, t=1은 데이터다. 확인한 코드의 sigma는 반대이므로 sigma=1−t로 대응한다. 각 숫자는 분포·보간을 설명하는 값이며 실제 activation 측정치가 아니다."
+        }
+      ],
+      "sources": [
+        {
+          "label": "DreamZero 원문 해당 식",
+          "url": "https://arxiv.org/html/2602.15922#A4.E6"
+        }
+      ]
+    }
+  ]
+}

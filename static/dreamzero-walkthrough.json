@@ -465,8 +465,8 @@
       "mechanics": [
         {
           "title": "어느 축을 평균내는가",
-          "explanation": "영상 원소별 squared error는 [B,F,Cz,h,w]다. 채널·공간 축을 평균하면 [B,F]가 남아 timestep별 weight를 적용할 수 있다. 마지막 전체 평균은 scalar다.",
-          "input_shape": "error [B,F,Cz,h,w]",
+          "explanation": "영상 prediction과 target의 원소별 squared error는 [B,Cz,F,h,w]다. 코드의 dim=(1,3,4), 즉 채널·공간 축을 평균하면 [B,F]가 남아 timestep별 weight를 적용할 수 있다. 마지막 전체 평균은 scalar다.",
+          "input_shape": "error [B,Cz,F,h,w]",
           "output_shape": "per-frame [B,F] → scalar",
           "equation": "Lv=mean_b,f w(tbf)·mean_c,i,j (v̂−v*)²",
           "basis": "code",
