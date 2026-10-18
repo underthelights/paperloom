@@ -72,3 +72,23 @@ class WorkspaceLinksTests(unittest.TestCase):
     def test_invalid_and_missing_selection(self):
         for kind,ident in [('other','p'),('paper',None),('paper','missing'),('concept',[])]:
             with self.assertRaises(ValueError):W.links(kind,ident)
+
+    def test_index_uses_one_readonly_snapshot_for_all_notes(self):
+        for i in range(20):
+            self.add('paper',f'extra-{i}',f'Paper {i}','[[concept:c]]')
+        expected=W.links('concept','c')
+        with patch.object(R,'db',wraps=R.db) as connect:
+            actual=W.links('concept','c')
+        self.assertEqual(connect.call_count,1)
+        self.assertEqual(actual,expected)
+        self.assertEqual(len(actual['incoming']),22)
+
+    def test_snapshot_connection_rejects_writes(self):
+        with patch.object(W,'_links') as index:
+            def attempt(c,kind,ident):
+                self.assertTrue(c.in_transaction)
+                with self.assertRaises(__import__('sqlite3').OperationalError):
+                    c.execute('DELETE FROM records')
+                return {'protected':True}
+            index.side_effect=attempt
+            self.assertEqual(W.links('paper','p'),{'protected':True})

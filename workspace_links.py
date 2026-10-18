@@ -19,23 +19,29 @@ def key(value):
 def links(kind, ident):
     if kind not in ('paper', 'concept') or not isinstance(ident, str) or not 0 < len(ident) <= 100:
         raise ValueError('논문 또는 개념 ID를 지정하세요.')
+    with R.db() as c:
+        c.execute('PRAGMA query_only=ON')
+        c.execute('BEGIN')
+        return _links(c, kind, ident)
+
+
+def _links(c, kind, ident):
     nodes = []
     truncated = False
-    with R.db() as c:
-        for node_kind, query in (
-            ('paper', "SELECT id,json_extract(body,'$.title'),length(json_extract(body,'$.notes')),NULL FROM records ORDER BY id LIMIT ?"),
-            ('concept', "SELECT id,json_extract(body,'$.name'),length(json_extract(body,'$.notes')),json_extract(body,'$.papers') FROM knowledge WHERE kind='concept' ORDER BY id LIMIT ?")):
-            rows = c.execute(query, (MAX_NODES + 1,)).fetchall()
-            truncated |= len(rows) > MAX_NODES
-            for row in rows[:MAX_NODES]:
-                note_length = row[2] if isinstance(row[2], int) else 0
-                truncated |= note_length > MAX_NOTE
-                try:
-                    papers = json.loads(row[3]) if row[3] else []
-                except (ValueError, TypeError):
-                    papers = []
-                nodes.append({'kind': node_kind, 'id': row[0], 'title': row[1] or '',
-                              'note_length': note_length, 'papers': papers if isinstance(papers, list) else []})
+    for node_kind, query in (
+        ('paper', "SELECT id,json_extract(body,'$.title'),length(json_extract(body,'$.notes')),NULL FROM records ORDER BY id LIMIT ?"),
+        ('concept', "SELECT id,json_extract(body,'$.name'),length(json_extract(body,'$.notes')),json_extract(body,'$.papers') FROM knowledge WHERE kind='concept' ORDER BY id LIMIT ?")):
+        rows = c.execute(query, (MAX_NODES + 1,)).fetchall()
+        truncated |= len(rows) > MAX_NODES
+        for row in rows[:MAX_NODES]:
+            note_length = row[2] if isinstance(row[2], int) else 0
+            truncated |= note_length > MAX_NOTE
+            try:
+                papers = json.loads(row[3]) if row[3] else []
+            except (ValueError, TypeError):
+                papers = []
+            nodes.append({'kind': node_kind, 'id': row[0], 'title': row[1] or '',
+                          'note_length': note_length, 'papers': papers if isinstance(papers, list) else []})
     by_id = {(n['kind'], n['id']): n for n in nodes}
     selected = by_id.get((kind, ident))
     if not selected:
@@ -63,8 +69,7 @@ def links(kind, ident):
         if not source['note_length'] or not limit:
             continue
         table = 'records' if source['kind'] == 'paper' else 'knowledge'
-        with R.db() as c:
-            row = c.execute(f"SELECT substr(json_extract(body,'$.notes'),1,?) FROM {table} WHERE id=?", (limit, source['id'])).fetchone()
+        row = c.execute(f"SELECT substr(json_extract(body,'$.notes'),1,?) FROM {table} WHERE id=?", (limit, source['id'])).fetchone()
         note = row[0] if row and isinstance(row[0], str) else ''
         remaining -= len(note)
         masked = CODE.sub(lambda m: ' ' * len(m.group()), note)
