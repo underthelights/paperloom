@@ -136,3 +136,9 @@ class ConceptPipelineTests(unittest.TestCase):
         with R.db() as c:P.write(c,{'paper_id':self.pid,'report_id':'new-source','token':self.token,'status':'queued'})
         with patch.object(R,'cli',return_value=json.dumps({'concepts':[self.item]})) as cli:P.worker(self.pid,'new-source',self.token)
         self.assertNotIn('OLD_REPORT_SENTINEL',cli.call_args.args[1]);self.assertEqual(P.load(self.pid)['status'],'ready')
+
+    def test_concept_index_omits_personal_and_generated_bodies(self):
+        v=K.create('Index entry');v.update(notes='Private explanation',markdown='Long generated body',study_guide=self.guide,study_progress={'answers':{'q':{'answer':'Private answer'}}});K.put(v)
+        index=K.concept_index();self.assertEqual(index[0]['id'],v['id'])
+        for field in ('notes','markdown','study_guide','study_progress'):self.assertNotIn(field,index[0])
+        self.assertEqual(K.get(v['id'])['notes'],'Private explanation')

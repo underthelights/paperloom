@@ -67,7 +67,7 @@ def check_evidence(evidence,p,text):
         if e.get('url') not in allowed:raise ValueError('개념 근거는 현재 논문의 원문이어야 합니다.')
 
 def connections(payload,p,text):
-    out=[];known={v['id'] for v in K.concepts()};items=payload.get('connections',[])
+    out=[];known={v['id'] for v in K.concept_index()};items=payload.get('connections',[])
     if not isinstance(items,list) or len(items)>6:raise ValueError('기존 개념 연결 형식 오류')
     for item in items:
         if item.get('concept_id') not in known or item.get('type') not in ('related-concept','contrasts','prerequisite'):raise ValueError('기존 개념 연결을 확인할 수 없습니다.')
@@ -180,7 +180,7 @@ def worker(pid,rid,token):
                 R.JOBS[jid]={'id':jid,'paper_id':pid,'paper_title':p['title'],'kind':'concepts','status':'running','stage':'knowledge','created':R.now(),'log':[],'cancel':False,'error':'','owner_pid':os.getpid()}
                 state.update(status='running',job_id=jid);write(c,state)
         R.persist_job(jid)
-        context={'paper':{k:p.get(k) for k in ('id','title','url','arxiv')},'paper_url':p.get('url') or '/api/research/pdf/'+pid,'source_text':text[:190000],'report':p['reports'][-1] if p.get('reports') and p['reports'][-1]['id']==rid else {'status':'unavailable','reason':'Detailed analysis pending. Read the supplied original; verify code independently or mark unverified.'},'existing_concepts':[{'id':v['id'],'name':v['name'],'aliases':v.get('aliases',[])} for v in K.concepts()]}
+        context={'paper':{k:p.get(k) for k in ('id','title','url','arxiv')},'paper_url':p.get('url') or '/api/research/pdf/'+pid,'source_text':text[:190000],'report':p['reports'][-1] if p.get('reports') and p['reports'][-1]['id']==rid else {'status':'unavailable','reason':'Detailed analysis pending. Read the supplied original; verify code independently or mark unverified.'},'existing_concepts':[{'id':v['id'],'name':v['name'],'aliases':v.get('aliases',[])} for v in K.concept_index()]}
         response=R.cli(jid,R.RESEARCH_RULES+'\n'+S.RULES+'\n'+RULES+'\n'+json.dumps(context,ensure_ascii=False),run,'concepts',timeout=1200,intake=True)
         payload=R.parse_json(response);items=validate(payload,p,text);related=connections(payload,p,text)
         with R.LOCK:

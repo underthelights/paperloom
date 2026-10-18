@@ -30,6 +30,10 @@ def get(ident):
 def concepts():
     with R.db() as c:return [json.loads(x[0]) for x in c.execute("SELECT body FROM knowledge WHERE kind='concept' ORDER BY json_extract(body,'$.name')")]
 
+def concept_index():
+    with R.db() as c:rows=c.execute("SELECT id,json_extract(body,'$.name') name,json_extract(body,'$.papers') papers,json_extract(body,'$.annotations') annotations,json_extract(body,'$.aliases') aliases,json_extract(body,'$.updated') updated FROM knowledge WHERE kind='concept' ORDER BY name").fetchall()
+    return [{**dict(r),'kind':'concept','papers':json.loads(r['papers'] or '[]'),'annotations':json.loads(r['annotations'] or '[]'),'aliases':json.loads(r['aliases'] or '[]')} for r in rows]
+
 def concept_key(value):return ' '.join(unicodedata.normalize('NFKC',str(value)).casefold().replace('-',' ').split())
 
 def create(name,pid=None,annotation_id=None):
@@ -39,7 +43,7 @@ def create(name,pid=None,annotation_id=None):
     if pid:R.get(pid)
     ident=hashlib.sha256(R.norm(name).encode()).hexdigest()[:32]
     with R.LOCK:
-        matches=[v for v in concepts() if concept_key(name) in {concept_key(v['name']),*(concept_key(a) for a in v.get('aliases',[]))}]
+        matches=[v for v in concept_index() if concept_key(name) in {concept_key(v['name']),*(concept_key(a) for a in v.get('aliases',[]))}]
         if len(matches)>1:raise ValueError('동일 이름의 개념이 여러 개입니다. 기존 노트를 선택하세요.')
         if matches:ident=matches[0]['id']
         else:
