@@ -1,6 +1,6 @@
 {
   "title": "DreamZero · 관측에서 행동까지",
-  "scope": "고정 커밋 ab790c198f의 정적 코드 대조 · 2026-10-18. 실제 모델 forward/로봇 실행을 측정하지 않았습니다. B/T/F/h/w/A/S는 입력과 resolved config에 의존하는 기호입니다. 이 해설은 DreamZero에만 적용합니다.",
+  "scope": "고정 커밋 ab790c198f의 정적 코드 대조 · 2026-10-18. 실제 모델 forward/로봇 실행을 측정하지 않았습니다. B/T/F/h/w/A/S는 입력과 resolved config에 의존하는 기호입니다. 이 해설은 DreamZero에만 적용합니다. 각 단계의 ‘텐서 내부’에서 논문이 생략한 축·합산·broadcast·mask·gradient 전제를 코드 근거, 수학적 유도, 예시로 구분합니다.",
   "steps": [
     {
       "id": "pixels",
@@ -20,6 +20,43 @@
       "verification": "source",
       "concepts": [
         "World Action Models"
+      ],
+      "mechanics": [
+        {
+          "title": "축 이름은 저장 순서와 다르다",
+          "explanation": "permute는 원소 값을 계산하지 않고 좌표 해석을 바꾼다. 예를 들어 원본 (b,t,h,w,c)에 있던 값은 결과 (b,c,t,h,w)에서 읽는다. 보통 stride가 바뀌는 view이므로 메모리가 재정렬되었다고 가정하면 안 된다.",
+          "input_shape": "[B,T,H,W,C]",
+          "output_shape": "[B,C,T,H,W]",
+          "equation": "y[b,c,t,h,w] = x[b,t,h,w,c]",
+          "basis": "mathematical",
+          "assumptions": "일반적인 strided tensor 의미. 실제 copy 여부는 연산·contiguity에 따라 다름.",
+          "evidence": []
+        },
+        {
+          "title": "reshape가 축 교환을 대신할 수 없는 이유",
+          "explanation": "연속 메모리의 일렬 순서를 그대로 묶어 shape만 바꾸는 것과, 축을 교환하는 것은 다르다. BCTHW를 바로 [B*T,C,H,W]로 reshape하면 C/T 의미가 보존되지 않을 수 있다. 코드의 정규화 경로는 먼저 BTCHW로 permute한다. 선택적 resize 경로는 별도 runtime 확인이 필요하다.",
+          "input_shape": "[B,C,T,H,W]",
+          "output_shape": "[B,T,C,H,W] → [B*T,C,H,W]",
+          "equation": "linear index(BTCHW) = ((((b·T+t)·C+c)·H+h)·W+w)",
+          "basis": "mathematical",
+          "assumptions": "원소 수만 같아도 의미가 같은 tensor는 아니다.",
+          "evidence": []
+        },
+        {
+          "title": "정수 픽셀과 부동소수 연산",
+          "explanation": "0–255 픽셀을 float로 바꾸고 /255 한다. 이는 축 변환과 별개인 값 변환이다. 이후 normalize_video 경로가 적용되므로 /255 결과를 최종 모델 입력 범위로 단정하지 않는다.",
+          "input_shape": "uint8 [B,C,T,H,W]",
+          "output_shape": "floating tensor, 동일 shape",
+          "equation": "u = float(pixel)/255",
+          "basis": "code",
+          "assumptions": "",
+          "evidence": [
+            {
+              "label": "해당 코드",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L622-L660"
+            }
+          ]
+        }
       ]
     },
     {
@@ -41,6 +78,48 @@
       "concepts": [
         "Video Diffusion Models",
         "Wan Video Models"
+      ],
+      "mechanics": [
+        {
+          "title": "VAE의 gradient 경계",
+          "explanation": "encode_video는 VAE를 bf16/eval 상태로 준비한 뒤 torch.no_grad 안에서 encode한다. 이 경로를 통과해 VAE encoder까지 학습 gradient가 전파된다고 해석하면 안 된다. 뒤의 DiT loss가 존재한다는 사실과는 별개다.",
+          "input_shape": "영상 tensor",
+          "output_shape": "latent tensor (VAE encoding 경로 gradient 미기록)",
+          "equation": "with torch.no_grad(): latents = vae.encode(...)",
+          "basis": "code",
+          "assumptions": "",
+          "evidence": [
+            {
+              "label": "해당 코드",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L552-L562"
+            }
+          ]
+        },
+        {
+          "title": "압축 shape는 실제 encoder 설정에서 결정",
+          "explanation": "F,h,w는 영상 데이터와 선택 VAE가 정한다. 일반 convolution 출력 길이 공식은 아래와 같지만, 이를 VAE 전체에 한 번 적용해서 정확한 압축률을 얻을 수는 없다. 레이어별 stride/padding 및 temporal causal 처리가 필요하다.",
+          "input_shape": "길이 L의 한 축",
+          "output_shape": "convolution 한 층의 Lout",
+          "equation": "Lout = floor((L+2p−d(k−1)−1)/s + 1)",
+          "basis": "mathematical",
+          "assumptions": "k=kernel, p=padding, d=dilation, s=stride. 이 식은 일반 convolution 한 층의 유도이며 VAE 전체 실행 기록이 아님.",
+          "evidence": []
+        },
+        {
+          "title": "첫 프레임 조건의 채널 수가 늘어나는 이유",
+          "explanation": "첫 영상 뒤에 zero frames를 붙여 VAE encode하고, 첫 잠재 프레임만 1인 4채널 mask를 concat한다. 기본 Cz=16이면 조건 y의 채널은 4+16=20, noisy latent 16과 결합하면 36이다.",
+          "input_shape": "image + zero frames → [B,Cz,F,h,w]",
+          "output_shape": "y [B,4+Cz,F,h,w]",
+          "equation": "Cin = Cz + (4+Cz); Cz=16 ⇒ Cin=36",
+          "basis": "code",
+          "assumptions": "기본 I2V 조건 결합 경로. 5B variant에 이 숫자를 그대로 사용하지 않음.",
+          "evidence": [
+            {
+              "label": "해당 코드",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L563-L584"
+            }
+          ]
+        }
       ]
     },
     {
@@ -61,6 +140,28 @@
       "verification": "source",
       "concepts": [
         "Video Diffusion Models"
+      ],
+      "mechanics": [
+        {
+          "title": "패치 토큰은 픽셀을 단순 나열한 벡터가 아니다",
+          "explanation": "실제 Conv3d는 패치 위치의 Cin×1×2×2 값에 학습된 가중치를 곱해 D개 출력을 만든다. 화면의 색 패치 펼치기는 원소가 묶이는 순서를 보여주는 예시일 뿐 학습 투영을 생략한다.",
+          "input_shape": "[B,Cin,F,h,w], W [D,Cin,1,2,2]",
+          "output_shape": "[B,D,F,h′,w′]",
+          "equation": "z[b,o,f,i,j] = bias[o] + Σc Σu=0..1 Σv=0..1 W[o,c,0,u,v]·x[b,c,f,2i+u,2j+v]",
+          "basis": "mathematical",
+          "assumptions": "kernel=stride=(1,2,2), padding=0인 patch embedding을 설명하는 index 전개.",
+          "evidence": []
+        },
+        {
+          "title": "flatten과 transpose 뒤 토큰 번호",
+          "explanation": "Conv 출력의 F,h′,w′를 하나의 길이 Nv로 합친 뒤 D와 교환한다. 어느 토큰이 어느 시공간 patch인지 n의 인덱스식으로 복원할 수 있다.",
+          "input_shape": "[B,D,F,h′,w′]",
+          "output_shape": "[B,Nv,D]",
+          "equation": "n=(f·h′+i)·w′+j; token[b,n,o]=z[b,o,f,i,j]",
+          "basis": "mathematical",
+          "assumptions": "h′=floor(h/2), w′=floor(w/2). 잘린 홀수 경계는 원본 크기와 대조.",
+          "evidence": []
+        }
       ]
     },
     {
@@ -81,6 +182,28 @@
       "verification": "source",
       "concepts": [
         "World Action Models"
+      ],
+      "mechanics": [
+        {
+          "title": "Linear는 마지막 축을 축약한다",
+          "explanation": "각 시간 위치마다 같은 가중치 행렬을 적용한다. batch나 시간 축을 합쳐 평균내는 연산이 아니다. MLP는 이런 projection과 비선형 함수를 합성한다.",
+          "input_shape": "X [B,A,da], W [D,da], b [D]",
+          "output_shape": "Y [B,A,D]",
+          "equation": "Y[b,t,o] = Σi X[b,t,i]W[o,i]+b[o]",
+          "basis": "mathematical",
+          "assumptions": "일반 Linear 전개. 실제 action encoder의 timestep 결합·MLP 층은 해당 클래스에서 따로 확인.",
+          "evidence": []
+        },
+        {
+          "title": "패딩 차원과 물리적 자유도",
+          "explanation": "da/ds는 모델 입력을 맞추기 위한 최대 차원일 수 있다. 로봇의 실제 DoF와 같다고 가정하면 안 된다. 패딩된 축에 대한 loss 및 반환값 처리까지 mask와 transform을 추적해야 한다.",
+          "input_shape": "로봇별 행동/상태",
+          "output_shape": "모델 공통 padded tensor",
+          "equation": "actual DoF ≤ padded dimension (설정 확인 필요)",
+          "basis": "unknown",
+          "assumptions": "각 실제 로봇의 좌표 단위·padding 제거·실행 명령은 이 해설의 검증 범위 밖.",
+          "evidence": []
+        }
       ]
     },
     {
@@ -101,6 +224,28 @@
       "verification": "source",
       "concepts": [
         "World Action Models"
+      ],
+      "mechanics": [
+        {
+          "title": "concat의 축과 길이 보존",
+          "explanation": "토큰 축(dim=1)에 이어 붙이므로 특징 폭 D는 바뀌지 않는다. 마지막 특징 축으로 concat하면 D가 더해져 전혀 다른 연산이 된다.",
+          "input_shape": "[B,Nv,D], [B,A,D], [B,S,D]",
+          "output_shape": "[B,Nv+A+S,D]",
+          "equation": "N = Nv + A + S",
+          "basis": "mathematical",
+          "assumptions": "",
+          "evidence": []
+        },
+        {
+          "title": "언어 조건의 broadcast를 추측하지 않기",
+          "explanation": "언어 context의 토큰 수 L과 주 sequence 길이 N은 다르다. cross attention에서는 query N개가 context L개를 읽는다. 동일 길이가 필요 없으며 [B,N,L] 축의 관계를 만든다.",
+          "input_shape": "query [B,H,N,dh], context K/V [B,H,L,dh]",
+          "output_shape": "attention logits [B,H,N,L]",
+          "equation": "score[b,h,i,j] = Σr Q[b,h,i,r]K[b,h,j,r]",
+          "basis": "mathematical",
+          "assumptions": "일반 cross-attention index 식. 각 block의 정확한 context 구성은 구현 근거 확인.",
+          "evidence": []
+        }
       ]
     },
     {
@@ -125,6 +270,83 @@
       "verification": "source",
       "concepts": [
         "World Action Models"
+      ],
+      "mechanics": [
+        {
+          "title": "Q/K/V: 같은 입력에서 다른 역할의 좌표 만들기",
+          "explanation": "Q는 무엇을 찾는지, K는 비교할 주소, V는 가져올 내용에 해당한다. 실제 코드에서는 Q/K projection 뒤 norm_q/norm_k를 적용하고 head로 나눈다. V는 별도 projection 후 reshape한다.",
+          "input_shape": "X [B,N,D]",
+          "output_shape": "Q,K,V [B,N,H,dh]",
+          "equation": "q = norm_q(q_proj(x)).view(B,N,H,dh)",
+          "basis": "code",
+          "assumptions": "",
+          "evidence": [
+            {
+              "label": "해당 코드",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L800-L813"
+            }
+          ]
+        },
+        {
+          "title": "head 분할은 원소 수를 보존한다",
+          "explanation": "D=H·dh일 때 마지막 D축을 H와 dh로 나누고 attention이 요구하는 축 순서로 해석한다. 5120=40×128이므로 기본 14B head 폭이 128이다.",
+          "input_shape": "[B,N,5120]",
+          "output_shape": "[B,N,40,128]",
+          "equation": "q[b,n,h,r] ↔ q_flat[b,n,h·128+r]",
+          "basis": "mathematical",
+          "assumptions": "기본 14B YAML. class 기본값과 다른 variant 설정을 섞지 않음.",
+          "evidence": []
+        },
+        {
+          "title": "행렬곱에서 합산되는 축은 dh",
+          "explanation": "Q의 i번째 토큰과 K의 j번째 토큰을 마지막 특징축 r에서 내적한다. 출력에는 i와 j가 모두 남는다. batch/head 축은 독립적으로 같은 계산을 한다.",
+          "input_shape": "Q [B,H,Nq,dh], K [B,H,Nk,dh]",
+          "output_shape": "scores [B,H,Nq,Nk]",
+          "equation": "S[b,h,i,j] = Σr=1..dh Q[b,h,i,r] K[b,h,j,r]",
+          "basis": "mathematical",
+          "assumptions": "",
+          "evidence": []
+        },
+        {
+          "title": "왜 √dh로 나누는가",
+          "explanation": "성분별 평균0·분산1이고 서로 독립이라는 단순화 아래 dh개 곱의 합은 분산이 dh다. √dh로 나누면 분산이 약1이 되어 softmax가 차원 증가만으로 지나치게 한 원소에 몰리는 것을 완화한다. 실제 normalized Q/K의 분포가 이 가정과 정확히 같다는 주장은 아니다.",
+          "input_shape": "S [B,H,Nq,Nk]",
+          "output_shape": "scaled S, 동일 shape",
+          "equation": "Var(Σr qr kr)=dh; Var(S/√dh)=1",
+          "basis": "mathematical",
+          "assumptions": "독립·영평균·단위분산 가정에 따른 설명용 유도; 실제 activation 통계는 측정하지 않음.",
+          "evidence": []
+        },
+        {
+          "title": "mask는 값0을 주는 것이 아니라 볼 수 없게 한다",
+          "explanation": "허용하지 않는 logit에 −∞를 더하면 exp(−∞)=0이 된다. 0을 더하는 것은 차단이 아니다. causal/block 조건이 단순한 전역 아래삼각 mask와 같다고 가정하면 안 된다.",
+          "input_shape": "scores [B,H,Nq,Nk], broadcastable mask M",
+          "output_shape": "masked scores, 동일 shape",
+          "equation": "S′=S/√dh+M; Mij∈{0,−∞}",
+          "basis": "mathematical",
+          "assumptions": "일반 수학적 표현. 실제 구현은 block별 K/V 문맥을 선택해 같은 접근 제한을 구현할 수 있음.",
+          "evidence": []
+        },
+        {
+          "title": "softmax는 key 축마다 합이 1",
+          "explanation": "각 query 행 i를 고정하고 모든 key j에 대해 정규화한다. 전체 tensor를 한 번에 정규화하는 것이 아니다. max를 빼면 exp overflow를 줄이면서 비율은 보존된다.",
+          "input_shape": "logits [B,H,Nq,Nk]",
+          "output_shape": "P [B,H,Nq,Nk]",
+          "equation": "Pij=exp(S′ij−maxk S′ik)/Σj exp(S′ij−maxk S′ik); Σj Pij=1",
+          "basis": "mathematical",
+          "assumptions": "모든 key가 masked인 행은 별도 처리 필요. 일반 유한 logit 행에 대한 식.",
+          "evidence": []
+        },
+        {
+          "title": "V 가중합과 head 병합",
+          "explanation": "query i마다 모든 key의 V를 확률 Pij로 가중합한다. key 축 j는 사라지고 V 특징축 r이 남는다. head 출력을 이어 붙여 D로 돌아가며 output projection을 거친다.",
+          "input_shape": "P [B,H,Nq,Nk], V [B,H,Nk,dh]",
+          "output_shape": "O [B,H,Nq,dh] → [B,Nq,D]",
+          "equation": "O[b,h,i,r] = Σj P[b,h,i,j]V[b,h,j,r]",
+          "basis": "mathematical",
+          "assumptions": "Attention의 논리적 식. fused kernel은 scores 전체를 메모리에 만들지 않을 수 있음.",
+          "evidence": []
+        }
       ]
     },
     {
@@ -145,6 +367,33 @@
       "verification": "source",
       "concepts": [
         "Flow Matching"
+      ],
+      "mechanics": [
+        {
+          "title": "σ의 방향을 먼저 고정",
+          "explanation": "이 구현의 σ=0은 data, σ=1은 noise다. 다른 논문에서 time 방향이 반대면 target의 부호도 바뀔 수 있다. 이름 flow matching이 같다는 이유로 식을 복사하면 안 된다.",
+          "input_shape": "clean x, noise ε",
+          "output_shape": "xσ",
+          "equation": "xσ=(1−σ)x+σε ⇒ dxσ/dσ=ε−x",
+          "basis": "mathematical",
+          "assumptions": "",
+          "evidence": []
+        },
+        {
+          "title": "σ broadcast는 sample 축을 보존",
+          "explanation": "scheduler는 σ가 원본 sample과 같은 rank가 될 때까지 끝에 singleton 축을 붙인다. [B*F] σ는 영상 [B*F,Cz,h,w]에 대해 [B*F,1,1,1]로 broadcast된다. 한 sample의 모든 공간·채널에 같은 σ가 적용된다.",
+          "input_shape": "σ [B*F], x [B*F,Cz,h,w]",
+          "output_shape": "σ [B*F,1,1,1] → xσ [B*F,Cz,h,w]",
+          "equation": "xσ[k,c,i,j]=(1−σ[k])x[k,c,i,j]+σ[k]ε[k,c,i,j]",
+          "basis": "code",
+          "assumptions": "",
+          "evidence": [
+            {
+              "label": "해당 코드",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/flow_match_scheduler.py#L73-L95"
+            }
+          ]
+        }
       ]
     },
     {
@@ -165,6 +414,33 @@
       "verification": "source",
       "concepts": [
         "World Action Models"
+      ],
+      "mechanics": [
+        {
+          "title": "정답 prefix와 정보 누출은 mask로 구분",
+          "explanation": "clean 문맥을 붙였다는 것만으로 모든 정답을 모든 query가 볼 수 있는 것은 아니다. 해당 action block은 첫 clean frame과 앞선 clean blocks, 자기 noisy image/action/state 블록의 K/V를 읽도록 문맥이 구성된다.",
+          "input_shape": "clean/noisy video, action/state Q/K/V",
+          "output_shape": "해당 block의 제한된 K/V context",
+          "equation": "Kcontext = [past_clean; own_noisy_image; own_action; own_state]",
+          "basis": "code",
+          "assumptions": "",
+          "evidence": [
+            {
+              "label": "해당 코드",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L735-L784"
+            }
+          ]
+        },
+        {
+          "title": "학습에서의 gradient와 추론 문맥",
+          "explanation": "teacher forcing은 입력 문맥을 제공하는 방식이다. optimizer update와 같은 뜻이 아니다. loss의 gradient가 어떤 parameter까지 가는지는 requires_grad/no_grad/detach를 따라 확인해야 한다.",
+          "input_shape": "loss와 연산 그래프",
+          "output_shape": "parameter별 gradient 또는 없음",
+          "equation": "∂L/∂θ = Σ paths (chain rule)",
+          "basis": "mathematical",
+          "assumptions": "학습 전반의 일반 원리. VAE no_grad는 별도 코드 단계에서 확인.",
+          "evidence": []
+        }
       ]
     },
     {
@@ -185,6 +461,33 @@
       "verification": "source",
       "concepts": [
         "Flow Matching"
+      ],
+      "mechanics": [
+        {
+          "title": "어느 축을 평균내는가",
+          "explanation": "영상 원소별 squared error는 [B,F,Cz,h,w]다. 채널·공간 축을 평균하면 [B,F]가 남아 timestep별 weight를 적용할 수 있다. 마지막 전체 평균은 scalar다.",
+          "input_shape": "error [B,F,Cz,h,w]",
+          "output_shape": "per-frame [B,F] → scalar",
+          "equation": "Lv=mean_b,f w(tbf)·mean_c,i,j (v̂−v*)²",
+          "basis": "code",
+          "assumptions": "",
+          "evidence": [
+            {
+              "label": "해당 코드",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L750-L815"
+            }
+          ]
+        },
+        {
+          "title": "mask를 곱한 평균과 유효 원소 평균의 차이",
+          "explanation": "예를 들어 error=[2,4], mask=[1,0]이면 전체 길이로 평균할 때1, mask 합으로 나눌 때2다. 패딩 비율에 따라 loss 크기가 달라질 수 있으므로 두 연산을 혼동하면 안 된다.",
+          "input_shape": "example errors [2,4], mask [1,0]",
+          "output_shape": "mean masked =1; valid mean =2",
+          "equation": "Σi mi ei / D ≠ Σi mi ei / Σi mi",
+          "basis": "illustrative",
+          "assumptions": "교육용 두 원소 예제. 실제 배치의 loss 측정이 아님.",
+          "evidence": []
+        }
       ]
     },
     {
@@ -206,6 +509,33 @@
       "concepts": [
         "KV Cache Observation Replacement",
         "Closed-loop Control"
+      ],
+      "mechanics": [
+        {
+          "title": "KV를 저장하면 무엇을 재계산하지 않는가",
+          "explanation": "새 query가 과거를 읽기 위해 과거 토큰의 K/V를 다시 계산하는 일을 줄인다. 모든 attention 비용이 사라지는 것은 아니다. 새 Q와 허용된 cached K의 비교는 여전히 필요하다.",
+          "input_shape": "cached K,V plus current block",
+          "output_shape": "extended/replaced video context",
+          "equation": "attention(Qnew, [Kpast;Knew], [Vpast;Vnew])",
+          "basis": "mathematical",
+          "assumptions": "캐시의 일반 논리. 실제 코드의 관측 replacement 및 action cache 제외 규칙은 아래 근거 확인.",
+          "evidence": []
+        },
+        {
+          "title": "행동 토큰을 영구 과거 영상으로 남기지 않기",
+          "explanation": "추론 attention 경로는 action queries/keys/values를 영상 cache와 구분한다. 반복 denoising 중 현재 행동 추정치와 실제 과거 관측을 같은 영구 cache로 취급하면 의미가 달라진다.",
+          "input_shape": "current video/action K,V",
+          "output_shape": "video KV cache + ephemeral action context",
+          "equation": "cache content ≠ all current tokens",
+          "basis": "code",
+          "assumptions": "",
+          "evidence": [
+            {
+              "label": "해당 코드",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L1041-L1140"
+            }
+          ]
+        }
       ]
     },
     {
@@ -227,6 +557,33 @@
       "concepts": [
         "Flow Matching",
         "Asynchronous Inference"
+      ],
+      "mechanics": [
+        {
+          "title": "scheduler step은 training step이 아니다",
+          "explanation": "추론의 반복 step은 sample 값을 바꾸는 적분/solver 단계다. 매 step마다 optimizer로 모델 parameter를 학습하는 뜻이 아니다. 아래 Euler 식은 방향을 이해하는 일반식이며 실제 구현은 FlowUniPC multistep scheduler다.",
+          "input_shape": "sample xσ, predicted velocity",
+          "output_shape": "next sample",
+          "equation": "Euler example: xσ+Δσ ≈ xσ + Δσ·vθ(xσ,σ)",
+          "basis": "illustrative",
+          "assumptions": "실제 UniPC update 식의 대체 구현으로 제시하지 않음.",
+          "evidence": []
+        },
+        {
+          "title": "두 schedule과 guidance 경로를 따로 추적",
+          "explanation": "video는 조건/무조건 속도를 선형 결합한다. action scheduler는 flow_pred_cond_action을 받는다. video의 최종 sigma를 높이는 옵션이 action의 완전 denoise까지 중지시키는 것으로 해석하면 안 된다.",
+          "input_shape": "video cond/uncond, action cond predictions",
+          "output_shape": "각 scheduler가 갱신한 video/action",
+          "equation": "video: vu+s(vc−vu); action: vc_action",
+          "basis": "code",
+          "assumptions": "",
+          "evidence": [
+            {
+              "label": "해당 코드",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L1274-L1305"
+            }
+          ]
+        }
       ]
     },
     {
@@ -248,6 +605,18 @@
       "concepts": [
         "World Action Models",
         "Closed-loop Control"
+      ],
+      "mechanics": [
+        {
+          "title": "latent와 픽셀, 정규화 행동과 물리 명령은 다른 값",
+          "explanation": "shape가 영상처럼 5차원이어도 Cz개 잠재 채널은 RGB가 아니다. action tensor도 그대로 모터 명령이라고 확정할 수 없다. decode와 inverse transform의 경계를 넘을 때 단위와 축을 다시 확인한다.",
+          "input_shape": "video latent; normalized action",
+          "output_shape": "RGB / physical action은 추가 변환 필요",
+          "equation": "RGB = VAE.decode(latent); physical action = inverse_transform(action)",
+          "basis": "mathematical",
+          "assumptions": "실제 배포 wrapper의 inverse transform 식·모터 명령은 확인 불가.",
+          "evidence": []
+        }
       ]
     },
     {
@@ -269,6 +638,18 @@
       "concepts": [
         "Asynchronous Inference",
         "World Action Models"
+      ],
+      "mechanics": [
+        {
+          "title": "percentage point와 상대 변화율",
+          "explanation": "83%에서74%로 바뀌면 절대 차이는9 percentage points, 상대 감소는9/83≈10.84%다. 서로 다른 수치를 동일한 9% 감소라고 쓰면 비교를 왜곡한다.",
+          "input_shape": "83%, 74%",
+          "output_shape": "9 pp; 약10.84% 상대 감소",
+          "equation": "Δpp=83−74; relative=(83−74)/83",
+          "basis": "mathematical",
+          "assumptions": "논문 Table3의 값을 이용한 산술. 통계적 유의성의 판정이 아님.",
+          "evidence": []
+        }
       ]
     }
   ]
