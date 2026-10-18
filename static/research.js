@@ -14,7 +14,7 @@ const safeURL=u=>{try{const v=new URL(u);return ['https:','http:'].includes(v.pr
 const link=(u,t)=>`<a href="${escape(safeURL(u))}" target="_blank" rel="noopener noreferrer">${escape(t)}</a>`;
 function toast(text){$('#toast').textContent=text;$('#toast').hidden=false;setTimeout(()=>$('#toast').hidden=true,6500)}
 async function api(path,data){const r=await fetch('/api/'+path,data?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}:{});const v=await r.json();if(!r.ok){const error=Error(v.error||'요청 실패');error.status=r.status;throw error}return v}
-const md=text=>{const equations=[];const safe=String(text??'').replace(/\$\$[\s\S]+?\$\$|\$[^$\n]+?\$/g,m=>{equations.push(m);return 'PAPERLOOMMATH'+(equations.length-1)+'TOKEN'});return window.paperloomMarkdown(safe).replace(/PAPERLOOMMATH(\d+)TOKEN/g,(_,i)=>escape(equations[+i]))};
+const md=text=>{const equations=[];const safe=String(text??'').replace(/\$\$[\s\S]+?\$\$|\$[^$\n]+?\$/g,m=>{equations.push(m);return 'PAPERLOOMMATH'+(equations.length-1)+'TOKEN'});const rendered=window.paperloomMarkdown(safe).replace(/PAPERLOOMMATH(\d+)TOKEN/g,(_,i)=>escape(equations[+i]));return window.formatReadingHTML?window.formatReadingHTML(rendered):rendered};
 function math(el){window.paperloomMath(el)}
 let theme=localStorage.getItem('research.theme')||'system';
 function setTheme(){document.documentElement.dataset.theme=theme==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):theme;$('#theme').title='테마: '+({system:'시스템',light:'밝게',dark:'어둡게'}[theme]);localStorage.setItem('research.theme',theme)}

@@ -22,7 +22,7 @@ function applyBilingual(){
  const sources=new Map([...root.querySelectorAll('[data-reader-block]')].map(n=>[n.dataset.readerBlock,n]));
  for(const block of originalDoc.blocks||[]){const source=sources.get(block.id);if(!source)continue;let row=source.parentElement;
  if(!row.classList.contains('bilingual-row')){row=document.createElement('div');row.className='bilingual-row';source.before(row);row.append(source);const ko=document.createElement('div');ko.className='bilingual-ko';ko.dataset.readerGenerated='true';ko.lang='ko';row.append(ko)}
- const output=bilingualValue.blocks[block.id];const ko=row.querySelector('.bilingual-ko');const text=output?.ko_template||output?.ko||'한국어 번역 대기 중…';if(ko.dataset.rendered!==text){ko.replaceChildren();const parts=text.split(/(⟦MATH_\d+⟧)/g);const formulas=source.querySelectorAll('math');for(const part of parts){const token=part.match(/^⟦MATH_(\d+)⟧$/);if(token&&formulas[+token[1]])ko.append(formulas[+token[1]].cloneNode(true));else ko.append(document.createTextNode(part))}ko.dataset.rendered=text}ko.classList.toggle('pending',!output);
+ const output=bilingualValue.blocks[block.id];const ko=row.querySelector('.bilingual-ko');const text=output?.ko_template||output?.ko||'한국어 번역 대기 중…';if(ko.dataset.rendered!==text){ko.replaceChildren();const parts=text.split(/(⟦MATH_\d+⟧)/g);const formulas=source.querySelectorAll('math');for(const part of parts){const token=part.match(/^⟦MATH_(\d+)⟧$/);if(token&&formulas[+token[1]])ko.append(formulas[+token[1]].cloneNode(true));else ko.append(document.createTextNode(part))}window.formatReadingStructure?.(ko);ko.dataset.rendered=text}ko.classList.toggle('pending',!output);
  }
  if(!previous)paintHighlights();paintAuto();
  bilingualSnapshots.set(root,{signature});

@@ -42,3 +42,5 @@ body.reading-mode{grid-template-columns:240px minmax(500px,1fr)}.reading-mode .c
  .equation-derivation>summary{padding:10px 12px}.equation-derivation-body{padding:4px 12px 12px}.equation-derivation details{padding-left:8px}.equation-derivation .katex-display{font-size:20px}
  #original-paper .equation-derivation td,#original-paper .equation-derivation th{padding:8px}
 }
+#original-paper .reading-enumerated-item,.bilingual-ko .reading-enumerated-item,.prose .reading-enumerated-item{display:block;margin-block:10px;padding-inline-start:12px;border-inline-start:2px solid var(--line);line-height:1.85}.reading-enumerated-item:first-child{margin-block-start:0}
+#original-paper li+li,.prose li+li{margin-block-start:.65em}#original-paper p+p,.prose p+p{margin-block-start:1em}

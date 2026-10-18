@@ -10,7 +10,7 @@ function readerRangeResolver(root=$('#original-paper')){
 }
 function readerRange(start,end){return readerRangeResolver()(start,end)}
 function paintHighlights(){if(!window.CSS?.highlights)return;const resolve=readerRangeResolver();for(const color of readerColors){const ranges=readerAnnotations.filter(a=>a.color===color&&a.version===originalDoc?.version).map(a=>resolve(a.start,a.end)).filter(Boolean);CSS.highlights.set('reader-'+color,new Highlight(...ranges))}}
-async function renderOriginal(){const epoch=renderEpoch,pid=paper.id;$('#content').innerHTML='<p class="caption">HTML 원문을 여는 중…</p>';try{const [doc,items]=await Promise.all([api('reader/document/'+pid),api('reader/annotations/'+pid)]);if(epoch!==renderEpoch)return;originalDoc=doc;readerAnnotations=items;readerSelection=null;document.body.classList.add('reading-mode');$('#content').innerHTML=`<div class="original-toolbar"><select id="original-toc" aria-label="원문 목차"><option value="">목차로 이동</option>${doc.toc.map(t=>`<option value="${escape(t.id)}">${escape(t.title)}</option>`).join('')}</select><span class="caption">${doc.format==='pdf-text'?'PDF 추출 본문':link(doc.source,'arXiv HTML 원문 ↗')} · 문장을 선택하세요</span><button id="reader-export" title="하이라이트 Markdown 내보내기">하이라이트 ↓</button><div id="bilingual-controls"></div></div>${doc.notice?`<p class="notice">${escape(doc.notice)}</p>`:''}<div class="original-layout"><div id="original-paper">${doc.html}</div><aside id="reader-panel"></aside></div><div id="reader-toolbar" hidden><button data-reader-action="highlight">하이라이트</button><button data-reader-action="note">메모</button><button data-reader-action="explain">Explain this</button><button data-reader-action="eli5">쉽게 설명</button><button data-reader-action="translate">번역</button></div>`;compactOriginalMetadata();installEquationDerivations($('#original-paper'),pid,epoch);paintHighlights();renderReaderPanel();$('#original-toc').onchange=e=>document.getElementById(e.target.value)?.scrollIntoView({block:'start'});$('#reader-export').onclick=()=>location.href='/api/reader/export/'+pid;
+async function renderOriginal(){const epoch=renderEpoch,pid=paper.id;$('#content').innerHTML='<p class="caption">HTML 원문을 여는 중…</p>';try{const [doc,items]=await Promise.all([api('reader/document/'+pid),api('reader/annotations/'+pid)]);if(epoch!==renderEpoch)return;originalDoc=doc;readerAnnotations=items;readerSelection=null;document.body.classList.add('reading-mode');$('#content').innerHTML=`<div class="original-toolbar"><select id="original-toc" aria-label="원문 목차"><option value="">목차로 이동</option>${doc.toc.map(t=>`<option value="${escape(t.id)}">${escape(t.title)}</option>`).join('')}</select><span class="caption">${doc.format==='pdf-text'?'PDF 추출 본문':link(doc.source,'arXiv HTML 원문 ↗')} · 문장을 선택하세요</span><button id="reader-export" title="하이라이트 Markdown 내보내기">하이라이트 ↓</button><div id="bilingual-controls"></div></div>${doc.notice?`<p class="notice">${escape(doc.notice)}</p>`:''}<div class="original-layout"><div id="original-paper">${doc.html}</div><aside id="reader-panel"></aside></div><div id="reader-toolbar" hidden><button data-reader-action="highlight">하이라이트</button><button data-reader-action="note">메모</button><button data-reader-action="explain">Explain this</button><button data-reader-action="eli5">쉽게 설명</button><button data-reader-action="translate">번역</button></div>`;window.formatReadingStructure($('#original-paper'));compactOriginalMetadata();installEquationDerivations($('#original-paper'),pid,epoch);paintHighlights();renderReaderPanel();$('#original-toc').onchange=e=>document.getElementById(e.target.value)?.scrollIntoView({block:'start'});$('#reader-export').onclick=()=>location.href='/api/reader/export/'+pid;
  $('#original-paper').onmouseup=()=>captureReaderSelection();$('#original-paper').onkeyup=()=>captureReaderSelection();$('#original-paper').onclick=e=>{const a=e.target.closest('a[href^="#original-"]');if(a){e.preventDefault();peekReference(a)}};
  $('#reader-toolbar').onpointerdown=e=>e.preventDefault();$$('[data-reader-action]').forEach(b=>b.onclick=()=>saveReaderSelection(b.dataset.readerAction));startReaderPolling(pid);startBilingual(pid,epoch);requestAnimationFrame(()=>{$('#content').scrollTop=openPapers.find(p=>p.id===pid)?.scroll||0});
  }catch(e){if(epoch===renderEpoch)$('#content').innerHTML=`<div class="empty"><h2>HTML 원문을 열 수 없습니다.</h2><p>${escape(e.message)}</p><p>HTML이 없는 논문은 PDF 탭에서 읽을 수 있습니다. PDF를 HTML 원문으로 표시하지 않습니다.</p><button id="reader-fallback">PDF 열기</button></div>`;$('#reader-fallback')?.addEventListener('click',()=>$('[data-tab="pdf"]').click())}}
@@ -100,3 +100,26 @@ async function installEquationDerivations(root,pid,epoch){
  }
  refreshEquationAnswers();
 }
+
+// Presentation-only grouping preserves every source character and UTF-16 anchor.
+window.formatReadingStructure=function(root){
+ const candidates=[...(root.matches?.('p,.bilingual-ko')?[root]:[]),...root.querySelectorAll('p,.bilingual-ko')];
+ for(const block of candidates){
+  if(block.querySelector('.reading-enumerated-item')||block.closest('pre,code,table,math,.katex,[data-equation-derivation]'))continue;
+  const text=block.textContent,pattern=/(^|[\s:：;])((?:\([1-9]\d?\)|[1-9]\d?\)))(?=\s|[A-Za-z가-힣])/g;
+  const matches=[...text.matchAll(pattern)];if(matches.length<2||matches.length>30)continue;
+  if(matches.some((m,i)=>Number(m[2].replace(/\D/g,''))!==i+1))continue;
+  if(matches[0][2].startsWith('(')&&text.slice(0,matches[0].index).trim()&&!/[:：]\s*$/.test(text.slice(0,matches[0].index)))continue;
+  const starts=matches.map(m=>m.index+m[1].length),mathRanges=[...text.matchAll(/\$\$[\s\S]*?\$\$|\$[^$\n]*?\$/g)].map(m=>[m.index,m.index+m[0].length]);
+  const nodes=[];let total=0;const walker=document.createTreeWalker(block,NodeFilter.SHOW_TEXT);let node;
+  while(node=walker.nextNode()){nodes.push({node,start:total,end:total+node.length});total+=node.length}
+  const locate=offset=>nodes.find(n=>offset>=n.start&&offset<n.end);
+  if(starts.some((start,i)=>{const n=locate(start),body=text.slice(start+matches[i][2].length,starts[i+1]??text.length);return !n||n.node.parentElement.closest('a,math,.katex,code,pre')||mathRanges.some(([a,b])=>start>=a&&start<b)||body.trim().length<12}))continue;
+  for(let i=starts.length-1;i>=0;i--){
+   const start=starts[i],end=starts[i+1]??text.length,a=locate(start),b=locate(end-1);const range=document.createRange();range.setStart(a.node,start-a.start);range.setEnd(b.node,end-b.start);
+   const item=document.createElement('span');item.className='reading-enumerated-item';item.append(range.extractContents());range.insertNode(item);
+  }
+ }
+ return root;
+};
+window.formatReadingHTML=function(html){const template=document.createElement('template');template.innerHTML=html;window.formatReadingStructure(template.content);return template.innerHTML};
