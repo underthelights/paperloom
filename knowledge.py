@@ -11,8 +11,9 @@ def init():
         c.execute('CREATE TABLE IF NOT EXISTS knowledge(id TEXT PRIMARY KEY,kind TEXT NOT NULL,body TEXT NOT NULL)')
         for row in c.execute('SELECT body FROM knowledge').fetchall():
             v=json.loads(row[0])
-            for key in ('status','video_status'):
-                if v.get(key)=='running':v[key]='error';v['error']='앱 종료로 작업이 중단되었습니다. 다시 실행하세요.'
+            for key in ('status','video_status','study_status'):
+                if v.get(key) in ('running','queued'):
+                    v[key]='error';v['study_error' if key=='study_status' else 'error']='앱 종료로 작업이 중단되었습니다. 다시 실행하세요.'
             put(v)
     sync()
 
@@ -154,7 +155,10 @@ def worker(ident):
         with R.LOCK:R.JOBS.pop(jid,None)
 
 def export(ident,ipynb=False):
-    v=get(ident);text='# '+v['name']+'\n\n'+v.get('markdown','')+'\n\n## 개인 노트\n'+v.get('notes','')+'\n\n## 연결 논문\n'
+    v=get(ident)
+    import concept_study
+    study=concept_study.export_markdown(ident) if v.get('kind')=='concept' else ''
+    text='# '+v['name']+'\n\n'+v.get('markdown','')+study+'\n\n## 개인 노트\n'+v.get('notes','')+'\n\n## 연결 논문\n'
     for pid in v['papers']:
         p=R.get(pid);text+='- ['+p['title']+']('+p.get('url','')+')\n'
     for aid in v['annotations']:

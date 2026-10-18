@@ -218,7 +218,7 @@ def state():
         p=dict(row)
         if isinstance(p['authors'],str):p['authors']=json.loads(p['authors'])
         papers.append(p)
-    return {'papers':papers,'jobs':saved_jobs(),'job_limits':{'parallel':CLI_SCHEDULER.capacity,'waiting':CLI_SCHEDULER.max_waiting},'notion':meta.get('notion',{}),
+    return {'papers':papers,'jobs':saved_jobs(),'job_limits':{'parallel':CLI_SCHEDULER.capacity,'waiting':CLI_SCHEDULER.max_waiting},'features':{'concept_study':True},'notion':meta.get('notion',{}),
             'counts':{'candidates':sum(p['status']=='candidate' for p in papers),'papers':sum(p['status']!='candidate' for p in papers),'briefs':sum(p['report_count']>0 for p in papers)},
             'skills':json.loads((SKILLS/'PROVENANCE.json').read_text())}
 
