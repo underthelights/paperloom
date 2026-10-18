@@ -1,8 +1,15 @@
 'use strict';
 let originalDoc=null,readerAnnotations=[],readerSelection=null,readerActive=null,readerTimer=null;
 const readerColors=['yellow','green','blue','pink'];
-function readerRange(start,end){const root=$('#original-paper');if(!root)return null;const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,{acceptNode:n=>n.parentElement.closest('[data-reader-generated]')?NodeFilter.FILTER_REJECT:NodeFilter.FILTER_ACCEPT});let n,offset=0,a,b;while(n=walker.nextNode()){const next=offset+n.length;if(!a&&start>=offset&&start<next)a=[n,start-offset];if(end>offset&&end<=next){b=[n,end-offset];break}offset=next}if(!a||!b)return null;const r=document.createRange();r.setStart(...a);r.setEnd(...b);return r}
-function paintHighlights(){if(!window.CSS?.highlights)return;for(const color of readerColors){const ranges=readerAnnotations.filter(a=>a.color===color&&a.version===originalDoc?.version).map(a=>readerRange(a.start,a.end)).filter(Boolean);CSS.highlights.set('reader-'+color,new Highlight(...ranges))}}
+function readerRangeResolver(root=$('#original-paper')){
+ if(!root)return ()=>null;
+ const nodes=[],ends=[];let offset=0,n;const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,{acceptNode:n=>n.parentElement.closest('[data-reader-generated]')?NodeFilter.FILTER_REJECT:NodeFilter.FILTER_ACCEPT});
+ while(n=walker.nextNode()){if(!n.length)continue;nodes.push(n);offset+=n.length;ends.push(offset)}
+ const find=value=>{let lo=0,hi=ends.length;while(lo<hi){const mid=(lo+hi)>>>1;if(ends[mid]<=value)lo=mid+1;else hi=mid}return lo};
+ return (start,end)=>{if(!Number.isInteger(start)||!Number.isInteger(end)||start<0||end<=start||end>offset)return null;const a=find(start),b=find(end-1);if(!nodes[a]?.isConnected||!nodes[b]?.isConnected)return null;const r=document.createRange();r.setStart(nodes[a],start-(a?ends[a-1]:0));r.setEnd(nodes[b],end-(b?ends[b-1]:0));return r};
+}
+function readerRange(start,end){return readerRangeResolver()(start,end)}
+function paintHighlights(){if(!window.CSS?.highlights)return;const resolve=readerRangeResolver();for(const color of readerColors){const ranges=readerAnnotations.filter(a=>a.color===color&&a.version===originalDoc?.version).map(a=>resolve(a.start,a.end)).filter(Boolean);CSS.highlights.set('reader-'+color,new Highlight(...ranges))}}
 async function renderOriginal(){const epoch=renderEpoch,pid=paper.id;$('#content').innerHTML='<p class="caption">HTML 원문을 여는 중…</p>';try{const [doc,items]=await Promise.all([api('reader/document/'+pid),api('reader/annotations/'+pid)]);if(epoch!==renderEpoch)return;originalDoc=doc;readerAnnotations=items;readerSelection=null;document.body.classList.add('reading-mode');$('#content').innerHTML=`<div class="original-toolbar"><select id="original-toc" aria-label="원문 목차"><option value="">목차로 이동</option>${doc.toc.map(t=>`<option value="${escape(t.id)}">${escape(t.title)}</option>`).join('')}</select><span class="caption">${doc.format==='pdf-text'?'PDF 추출 본문':link(doc.source,'arXiv HTML 원문 ↗')} · 문장을 선택하세요</span><button id="reader-export">하이라이트 내보내기 ↓</button></div>${doc.notice?`<p class="notice">${escape(doc.notice)}</p>`:''}<div id="bilingual-controls"></div><div class="original-layout"><div id="original-paper">${doc.html}</div><aside id="reader-panel"></aside></div><div id="reader-toolbar" hidden><button data-reader-action="highlight">하이라이트</button><button data-reader-action="note">메모</button><button data-reader-action="explain">Explain this</button><button data-reader-action="eli5">쉽게 설명</button><button data-reader-action="translate">번역</button></div>`;compactOriginalMetadata();installEquationDerivations($('#original-paper'),pid,epoch);paintHighlights();renderReaderPanel();$('#original-toc').onchange=e=>document.getElementById(e.target.value)?.scrollIntoView({block:'start'});$('#reader-export').onclick=()=>location.href='/api/reader/export/'+pid;
  $('#original-paper').onmouseup=()=>captureReaderSelection();$('#original-paper').onkeyup=()=>captureReaderSelection();$('#original-paper').onclick=e=>{const a=e.target.closest('a[href^="#original-"]');if(a){e.preventDefault();peekReference(a)}};
  $('#reader-toolbar').onpointerdown=e=>e.preventDefault();$$('[data-reader-action]').forEach(b=>b.onclick=()=>saveReaderSelection(b.dataset.readerAction));startReaderPolling(pid);startBilingual(pid,epoch);requestAnimationFrame(()=>{$('#content').scrollTop=openPapers.find(p=>p.id===pid)?.scroll||0});
@@ -44,14 +51,14 @@ function equationSourceSelection(node,pid){
  const start=fragment.textContent.length,exact=node.textContent;
  return {paper_id:pid,start,end:start+exact.length,exact,version:originalDoc.version};
 }
+function installLazyEquationMath(section,body){let rendered=false;section.addEventListener('toggle',()=>{if(section.open&&!rendered){window.paperloomMath?.(body);rendered=true}})}
 function renderEquationAnswer(container,annotation){
  container.replaceChildren();
  if(annotation.status==='running'){container.textContent='수식 전개를 생성 중입니다. 완료되면 이 위치에 저장됩니다.';return}
  if(annotation.error){container.textContent='생성 실패: '+annotation.error;return}
  if(!annotation.answer)return;
  const chunks=annotation.answer.split(/(?=^#{1,3} )/m).filter(s=>s.trim());
- for(const chunk of chunks){const match=chunk.match(/^#{1,3} ([^\n]+)\n?/),section=document.createElement('details'),summary=document.createElement('summary'),body=document.createElement('div');summary.textContent=match?match[1]:'수식 해설';body.className='equation-derivation-body prose';body.innerHTML=md(match?chunk.slice(match[0].length):chunk);section.append(summary,body);container.append(section)}
- window.paperloomMath?.(container);
+ for(const chunk of chunks){const match=chunk.match(/^#{1,3} ([^\n]+)\n?/),section=document.createElement('details'),summary=document.createElement('summary'),body=document.createElement('div');summary.textContent=match?match[1]:'수식 해설';body.className='equation-derivation-body prose';body.innerHTML=md(match?chunk.slice(match[0].length):chunk);section.append(summary,body);installLazyEquationMath(section,body);container.append(section)}
 }
 function refreshEquationAnswers(){
  for(const panel of document.querySelectorAll('.equation-derivation[data-annotation-id]')){
@@ -75,7 +82,7 @@ async function installEquationDerivations(root,pid,epoch){
   const panel=document.createElement('details');panel.className='equation-derivation';panel.dataset.readerGenerated='true';
   const summary=document.createElement('summary');summary.textContent=entry?entry.title+' · 단계별 전개':'수식 전개 · 기호부터 숫자 대입까지';panel.append(summary);
   if(entry){
-   for(const item of entry.sections){const section=document.createElement('details'),heading=document.createElement('summary'),body=document.createElement('div');heading.textContent=item.title;body.className='equation-derivation-body';const text=document.createElement('p');text.textContent=item.text;body.append(text);if(item.latex){const eq=document.createElement('div');eq.textContent='$$'+item.latex+'$$';body.append(eq)}section.append(heading,body);panel.append(section)}
+   for(const item of entry.sections){const section=document.createElement('details'),heading=document.createElement('summary'),body=document.createElement('div');heading.textContent=item.title;body.className='equation-derivation-body';const text=document.createElement('p');text.textContent=item.text;body.append(text);if(item.latex){const eq=document.createElement('div');eq.textContent='$$'+item.latex+'$$';body.append(eq)}section.append(heading,body);installLazyEquationMath(section,body);panel.append(section)}
    const sources=document.createElement('p');sources.className='equation-basis';sources.append('검증 근거: ');for(const s of entry.sources||[]){if(!/^https:\/\//.test(s.url))continue;const a=document.createElement('a');a.textContent=s.label;a.href=s.url;a.target='_blank';a.rel='noopener noreferrer';sources.append(a,' ')}panel.append(sources);
   }else{
    const note=document.createElement('p');note.className='equation-assumptions';note.textContent='이 수식의 검증된 전개는 아직 없습니다. 생성하면 원문 문맥을 사용한 AI 해설이 하이라이트와 함께 저장됩니다. 코드가 제공되지 않은 shape·구현은 확인 불가로 표시합니다.';panel.append(note);
@@ -90,7 +97,6 @@ async function installEquationDerivations(root,pid,epoch){
    if(paper?.id!==pid||renderEpoch!==epoch)return;const items=await api('reader/annotations/'+pid);if(paper?.id!==pid||renderEpoch!==epoch)return;readerAnnotations=items;refreshEquationAnswers();paintHighlights();renderReaderPanel();
   }catch(e){answer.textContent=e.message;button.disabled=false}};
   const placement=anchor.closest('[data-reader-block]')||anchor;placement.after(panel);
-  window.paperloomMath?.(panel);
  }
  refreshEquationAnswers();
 }

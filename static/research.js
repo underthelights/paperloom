@@ -14,7 +14,18 @@ function math(el){window.paperloomMath(el)}
 let theme=localStorage.getItem('research.theme')||'system';
 function setTheme(){document.documentElement.dataset.theme=theme==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):theme;$('#theme').title='테마: '+({system:'시스템',light:'밝게',dark:'어둡게'}[theme]);localStorage.setItem('research.theme',theme)}
 setTheme();matchMedia('(prefers-color-scheme: dark)').addEventListener('change',setTheme);$('#theme').onclick=()=>{theme={system:'light',light:'dark',dark:'system'}[theme];setTheme();toast($('#theme').title)};
-async function refresh(){state=await api('research');renderList();renderProgress()}
+let refreshPromise=null,sidebarSignature='',progressSignature='';
+async function refresh(){
+ if(refreshPromise)return refreshPromise;
+ refreshPromise=(async()=>{
+  state=await api('research');
+  const nextSidebar=JSON.stringify(state.papers);
+  if(nextSidebar!==sidebarSignature){sidebarSignature=nextSidebar;renderList()}
+  const nextProgress=JSON.stringify([activeId,state.jobs]);
+  if(nextProgress!==progressSignature){progressSignature=nextProgress;renderProgress()}
+ })();
+ try{await refreshPromise}finally{refreshPromise=null}
+}
 function renderList(){
  $('#sync-label').textContent='개인 연구 라이브러리';
  const q=$('#search').value.trim().toLowerCase();const list=state.papers.filter(p=>p.status!=='candidate'&&((p.title+' '+(p.authors||[]).join(' ')).toLowerCase().includes(q))).sort((a,b)=>String(b.updated||'').localeCompare(String(a.updated||''))||a.id.localeCompare(b.id));
@@ -65,6 +76,17 @@ function renderHeader(){
  $('#reanalyze').onclick=async()=>{if(!paper.arxiv&&!paper.pdf_sha256)return openImport(paper.title);try{await api('research/analyze',{id:paper.id});await refresh()}catch(e){toast(e.message)}};
  if(paper.pdf_sha256)$('[data-tab=html]').textContent='추출 본문';else $('[data-tab=html]').textContent='HTML 원문';
  $('#export').disabled=!paper.reports?.length;$('#chat-context').textContent=paper.title;if(window.renderLibraryContext)renderLibraryContext(paper.id);
+ $('#paper-header').insertAdjacentHTML('beforeend','<details id="paper-links-disclosure"><summary>연결 노트</summary><div id="paper-workspace-links"></div></details>');
+ $('#paper-links-disclosure').ontoggle=e=>{if(e.target.open)mountPaperLinks()};
+}
+function mountPaperLinks(){
+ const host=$('#paper-workspace-links'),pid=paper?.id;
+ if(!host||!pid)return;
+ window.mountWorkspaceLinks?.(host,'paper',pid,{beforeNavigate:async()=>{
+  if(paper?.id!==pid)return;
+  const notes=$('#notes').value;clearTimeout(noteTimer);
+  await api('research/note',{id:pid,notes});
+ }});
 }
 function welcome(){return `<div class="empty"><div class="eyebrow">START WITH A PAPER</div><h2>근거를 읽고, 관계를 탐색하세요.</h2><p>논문 원문을 확보한 뒤 코드, 수식, 실험 결과, 연구실을 대조합니다. Notion의 기존 본문은 분석 근거로 사용하지 않습니다.</p><div class="metrics"><div><strong>${state.counts.candidates}</strong><small>확인할 후보</small></div><div><strong>${state.counts.papers}</strong><small>arXiv 논문</small></div><div><strong>${state.counts.briefs}</strong><small>작성된 브리프</small></div></div><div class="flow"><span>원문 수집</span>→<span>코드·연구실 확인</span>→<span>분석·검수</span>→<span>관계 탐색</span></div><button class="primary" id="welcome-add">＋ 첫 논문 추가</button><p class="caption">분석하지 않은 후보는 논문 수나 완료된 브리프 수에 포함되지 않습니다.</p></div>`}
 function renderContent(){
@@ -123,7 +145,7 @@ $$('[data-filter]').forEach(b=>b.onclick=()=>{filter=b.dataset.filter;$$('[data-
 $$('[data-tab]').forEach(b=>b.onclick=()=>{savePaperPosition();tab=b.dataset.tab;const opened=openPapers.find(p=>p.id===activeId);if(opened){opened.view=tab;opened.scroll=0}$$('[data-tab]').forEach(x=>x.classList.toggle('selected',x===b));renderContent()});
 $$('[data-side]').forEach(b=>b.onclick=()=>{$$('[data-side]').forEach(x=>x.classList.toggle('selected',x===b));$('#chat-pane').hidden=b.dataset.side!=='chat';$('#notes-pane').hidden=b.dataset.side!=='notes'});
 $('#toggle-side').onclick=()=>document.body.classList.toggle('no-side');$('#export').onclick=()=>{if(paper?.reports?.length)location.href='/api/research/export/'+paper.id};
-$('#notes').oninput=()=>{clearTimeout(noteTimer);const id=paper.id,notes=$('#notes').value;$('#note-status').textContent='저장 중…';noteTimer=setTimeout(async()=>{try{await api('research/note',{id,notes});if(paper?.id===id)$('#note-status').textContent='저장됨'}catch(e){toast(e.message)}},600)};
+$('#notes').oninput=()=>{clearTimeout(noteTimer);const id=paper.id,notes=$('#notes').value;$('#note-status').textContent='저장 중…';noteTimer=setTimeout(async()=>{try{await api('research/note',{id,notes});if(paper?.id===id){$('#note-status').textContent='저장됨';if($('#paper-links-disclosure')?.open)mountPaperLinks()}}catch(e){toast(e.message)}},600)};
 $('#suggestions').onclick=e=>{const b=e.target.closest('[data-question]');if(b){$('#question').value=b.dataset.question;$('#question').focus()}};
 $('#chat-form').onsubmit=async e=>{e.preventDefault();if(chatJob){await api('chat-cancel',{job_id:chatJob});return}const question=$('#question').value.trim();if(!question||!paper)return;const pid=paper.id;try{const j=await api('research/chat',{id:pid,question,quote,mode:paper.reports.length?'paper':'general'});chatJob=j.id;$('#send').textContent='중지';$('#chat-status').textContent='Codex 답변 작성 중…';const poll=setInterval(async()=>{try{const v=await api('chat-jobs/'+j.id);if(['done','error','cancelled'].includes(v.status)){clearInterval(poll);chatJob=null;$('#send').textContent='보내기 ↑';$('#chat-status').textContent='현재 브리프·선택 문맥';if(v.status==='done'){if(paper.id===pid){paper=await api('research/paper/'+pid);renderChat();$('#question').value='';quote='';$('#quote-chip').hidden=true}}else if(v.error)toast(v.error)}}catch(e){clearInterval(poll);chatJob=null;$('#send').textContent='보내기 ↑';toast(e.message)}},1200)}catch(e){toast(e.message)}};
 $('#question').onkeydown=e=>{if(e.key==='Enter'&&(e.metaKey||e.ctrlKey)){$('#chat-form').requestSubmit();e.preventDefault()}};
@@ -151,7 +173,27 @@ function renderGraph(){
  $('#graph-minus').onclick=()=>{scale=Math.max(.4,scale*.8);draw()};$('#graph-plus').onclick=()=>{scale=Math.min(4,scale*1.2);draw()};$('#graph-reset').onclick=()=>{scale=1;tx=ty=0;draw()};$$('[data-resolve]').forEach(b=>b.onclick=()=>openImport(refs[+b.dataset.resolve].title));
 }
 async function renderPdf(){const epoch=renderEpoch;const el=$('#content');el.innerHTML='<p class="caption">PDF 여는 중…</p>';try{if(!pdfDoc)pdfDoc=await paperloomPdf.getDocument({url:'/api/research/pdf/'+paper.id,isEvalSupported:false,cMapUrl:'/pdf-assets/cmaps/',cMapPacked:true,standardFontDataUrl:'/pdf-assets/standard_fonts/',wasmUrl:'/pdf-assets/wasm/'}).promise;if(epoch!==renderEpoch)return;el.innerHTML='<div class="pdf-toolbar"><button id="pdf-prev">←</button><span id="pdf-pages"></span><button id="pdf-next">→</button><span class="caption">문장을 선택하여 질문할 수 있습니다.</span></div><div id="pdf-view"><canvas class="pdf-canvas"></canvas><div class="textLayer"></div></div>';const page=await pdfDoc.getPage(pdfPage);if(epoch!==renderEpoch)return;const viewport=page.getViewport({scale:Math.min(1.5,(el.clientWidth-60)/page.getViewport({scale:1}).width)});const canvas=$('.pdf-canvas');canvas.width=viewport.width*devicePixelRatio;canvas.height=viewport.height*devicePixelRatio;canvas.style.width=viewport.width+'px';canvas.style.height=viewport.height+'px';$('#pdf-view').style.width=viewport.width+'px';await page.render({canvasContext:canvas.getContext('2d'),viewport,transform:[devicePixelRatio,0,0,devicePixelRatio,0,0]}).promise;if(epoch!==renderEpoch)return;const layer=$('.textLayer');layer.style.setProperty('--scale-factor',viewport.scale);layer.style.setProperty('--total-scale-factor',viewport.scale);const textLayer=new paperloomPdf.TextLayer({textContentSource:await page.getTextContent(),container:layer,viewport});await textLayer.render();$('#pdf-pages').textContent=pdfPage+' / '+pdfDoc.numPages;$('#pdf-prev').disabled=pdfPage===1;$('#pdf-next').disabled=pdfPage===pdfDoc.numPages;$('#pdf-prev').onclick=()=>{pdfPage--;renderContent()};$('#pdf-next').onclick=()=>{pdfPage++;renderContent()}}catch(e){if(epoch===renderEpoch)el.innerHTML='<div class="notice">수집한 PDF를 열지 못했습니다. 먼저 분석을 시작하거나 arXiv 원문 링크를 여세요.<br>'+escape(e.message)+'</div>'}}
-(async()=>{try{await refresh();window.showInbox();setInterval(async()=>{try{const old=paper?.reports?.length||0;await refresh();if(paper){const current=state.papers.find(p=>p.id===paper.id);if(current?.report_count!==undefined&&current.report_count!==old&&!window.inboxHome&&(typeof knowledgeView==='undefined'||!knowledgeView)){savePaperPosition();paper=await api('research/paper/'+paper.id);renderHeader();if(tab!=='html')renderContent();renderChat()}}}catch{}},4000)}catch(e){toast(e.message)}})();
+let workspacePollTimer=null,workspacePolling=false;
+async function pollWorkspace(){
+ if(workspacePolling)return;workspacePolling=true;
+ try{
+  const pid=paper?.id,old=paper?.reports?.length||0;
+  await refresh();
+  if(pid&&paper?.id===pid){
+   const current=state.papers.find(p=>p.id===pid);
+   if(current?.report_count!==undefined&&current.report_count!==old&&!window.inboxHome&&(typeof knowledgeView==='undefined'||!knowledgeView)){
+    const epoch=renderEpoch,next=await api('research/paper/'+pid);
+    if(paper?.id===pid&&epoch===renderEpoch){savePaperPosition();paper=next;renderHeader();if(tab!=='html')renderContent();renderChat()}
+   }
+  }
+ }catch{}finally{
+  workspacePolling=false;clearTimeout(workspacePollTimer);
+  const busy=state?.jobs?.some(j=>['queued','running'].includes(j.status));
+  workspacePollTimer=setTimeout(pollWorkspace,document.hidden?30000:busy?4000:15000);
+ }
+}
+(async()=>{try{await refresh();window.showInbox();workspacePollTimer=setTimeout(pollWorkspace,4000)}catch(e){toast(e.message)}})();
+
 
 renderPaperTabs();
 window.addEventListener("beforeunload",savePaperPosition);

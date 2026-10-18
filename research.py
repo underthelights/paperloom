@@ -204,11 +204,18 @@ def local_pdf_pages(p):
 
 
 def state():
-    records=all_records(); fields=('id','title','status','authors','year','url','arxiv','source','updated','category','openalex','doi')
-    with db() as c: meta={r[0]:json.loads(r[1]) for r in c.execute('SELECT * FROM meta')}
-    return {'papers':[{k:p.get(k) for k in fields} | {'report_count':len(p.get('reports',[]))} for p in records],
-            'jobs':saved_jobs(),'notion':meta.get('notion',{}),
-            'counts':{'candidates':sum(p['status']=='candidate' for p in records),'papers':sum(p['status']!='candidate' for p in records),'briefs':sum(bool(p.get('reports')) for p in records)},
+    fields=('id','title','status','authors','year','url','arxiv','source','updated','category','openalex','doi')
+    columns=','.join("json_extract(body,'$."+field+"') AS "+field for field in fields)
+    with db() as c:
+        rows=c.execute('SELECT '+columns+",COALESCE(json_array_length(body,'$.reports'),0) AS report_count FROM records ORDER BY rowid").fetchall()
+        meta={r[0]:json.loads(r[1]) for r in c.execute('SELECT * FROM meta')}
+    papers=[]
+    for row in rows:
+        p=dict(row)
+        if isinstance(p['authors'],str):p['authors']=json.loads(p['authors'])
+        papers.append(p)
+    return {'papers':papers,'jobs':saved_jobs(),'notion':meta.get('notion',{}),
+            'counts':{'candidates':sum(p['status']=='candidate' for p in papers),'papers':sum(p['status']!='candidate' for p in papers),'briefs':sum(p['report_count']>0 for p in papers)},
             'skills':json.loads((SKILLS/'PROVENANCE.json').read_text())}
 
 def snapshot(jid):
