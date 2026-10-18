@@ -85,3 +85,7 @@ Research guidance is in `research-skills/`, with provenance and the upstream ELI
 ## Sentence-aligned reading
 
 Original HTML and Korean translations can be paired by source-anchored sentences. Hover or focus either language to locate its counterpart. AI category colors use independently validated exact English and Korean quotes. Selecting a Korean phrase saves that phrase and its corresponding full English sentence; cross-sentence Korean selections are currently unsupported. Existing paragraph translations remain available while missing sentence alignments are generated. Translation snapshots preserve prior Korean selections across later changes. AI translations and classifications still require comparison with the source.
+
+## Background paper jobs
+
+Paper collection, analysis, bilingual translation and concept generation share a FIFO admission queue: up to2 Codex processing calls run concurrently, with up to10 waiting. Interactive chat uses its separate streaming path. The top toolbar lists jobs across papers; paragraph counts drive translation progress, while analysis shows its current operation. Existing running jobs are preserved until the app is closed.

@@ -23,7 +23,7 @@ let refreshPromise=null,sidebarSignature='',progressSignature='';
 async function refresh(){
  if(refreshPromise)return refreshPromise;
  refreshPromise=(async()=>{
-  state=await api('research');window.dispatchEvent(new Event('paperloom-state-changed'));
+  state=await api('research');if(state.job_limits)window.renderWorkQueue?.(state);window.dispatchEvent(new Event('paperloom-state-changed'));
   const nextSidebar=JSON.stringify(state.papers);
   if(nextSidebar!==sidebarSignature){sidebarSignature=nextSidebar;renderList()}
   const nextProgress=JSON.stringify([activeId,state.jobs]);
@@ -123,9 +123,12 @@ function renderContent(){
  el.innerHTML=`<article class="prose"><div class="tldr"><div class="eyebrow">핵심 요약</div>${md(r.tldr)}</div><div class="brief-evidence-line">AI 분석 · ${escape(r.created.slice(0,10))} · 검수 ${partial?'확인 필요':'통과'} · 단일 논문 분석</div>${partial?`<details class="notice"><summary>검수 기록 · 원문 대조가 필요한 항목</summary>${escape((r.review.issues||[]).join('\n'))}</details>`:''}${(paper.figures||[]).length?`<details class="brief-figure"><summary>논문 개요 그림 · Figure 1</summary>${(paper.figures||[]).slice(0,1).map((f,i)=>`<figure><img src="/api/research/figure/${paper.id}/${i}" alt="논문 개요 그림" loading="lazy"><figcaption>${link(f.source,'원문 그림 ↗')} · ${escape(f.caption)}</figcaption></figure>`).join('')}</details>`:''}<div class="brief-nav">${sections.map(([k,n,t])=>`<a href="#section-${k}">${n} ${t}</a>`).join('')}</div>${sections.map(([k,n,t])=>`<section id="section-${k}"><h2><span class="caption">${n} / </span>${t}</h2>${md(r[k])}</section>`).join('')}<h2>출처와 확인 범위</h2>${(r.checks||[]).map(c=>`<div class="notice"><b>${escape(c.name)}</b> · ${escape(c.status)}<br>${escape(c.reason)}</div>`).join('')}<ul>${(r.sources||[]).map(s=>`<li>${link(s.url,s.title||s.url)} <span class="caption">${escape(s.kind)}</span></li>`).join('')}</ul></article>`;math(el);
 }
 function renderProgress(){
- const latest=state.jobs.find(j=>j.paper_id===activeId&&!['reader','bilingual-reader','knowledge'].includes(j.stage));const j=latest&&['queued','running','error'].includes(latest.status)?latest:null;const el=$('#progress');el.hidden=!j;if(!j)return;
- const names={queued:'대기',sources:'원문',discovery:'코드·연구실',code:'저장소',analysis:'분석',tensor_trace:'코드·텐서 추적',review:'검수'};
- el.innerHTML=`${progressGauge(Object.keys(names).indexOf(j.stage),Object.keys(names).length,'완료 단계 · 시간 비율 아님')}${j.status==='error'?'<b>분석 실패</b> · '+escape(j.error):`<button id="cancel-run">중지</button><div class="steps">${Object.entries(names).map(([k,n])=>`<span class="${j.stage===k?'current':''}">${n}</span>`).join('<span>→</span>')}</div>${escape(j.log.at(-1)?.message||'앞선 분석이 끝나면 시작합니다.')}`}`;
+ const jobs=state.jobs.filter(j=>j.paper_id===activeId&&(j.kind?j.kind==='research':!['reader','bilingual-reader','knowledge','intake'].includes(j.stage)));
+ const j=jobs.find(j=>['queued','running'].includes(j.status))||(jobs[0]?.status==='error'?jobs[0]:null),el=$('#progress');el.hidden=!j;if(!j)return;
+ const names={sources:'원문 수집',discovery:'관련 연구',code:'코드 확인',analysis:'본문 분석',tensor_trace:'연산 분석',review:'검토'};
+ const waiting=j.cli_status==='queued'||j.status==='queued',failed=j.status==='error';
+ const label=failed?'분석 실패':waiting?`대기${j.queue_position?' · '+j.queue_position+'번째':''}`:(names[j.stage]||'분석 중');
+ el.innerHTML=`<div class="analysis-status"><strong>${escape(label)}</strong>${failed?'': '<button id="cancel-run">중지</button>'}</div>${failed?`<p class="notice">${escape(j.error||'분석을 완료하지 못했습니다.')}</p>`:waiting?'':progressGauge(0,0,label)}${!waiting&&!failed?`<div class="steps">${Object.entries(names).map(([k,n])=>`<span class="${j.stage===k?'current':''}">${n}</span>`).join('<span aria-hidden="true">·</span>')}</div>`:''}`;
  if($('#cancel-run'))$('#cancel-run').onclick=async()=>{await api('research/cancel',{id:j.id});await refresh()};
 }
 function renderChat(){
@@ -212,7 +215,12 @@ window.addEventListener("beforeunload",savePaperPosition);
 
 document.querySelector(".workspace-nav").addEventListener("click",e=>{savePaperPosition();if(e.target.closest("button")?.id!=="catalog")document.body.classList.remove("catalog-mode")},true);
 
-function progressGauge(done,total,label){const n=Math.max(0,Math.min(total,done)),percent=total?Math.floor(n/total*100):0;return `<div class="work-progress"><div><span>${escape(label)}</span><strong>${percent}%</strong></div><progress max="${total||1}" value="${n}" aria-label="${escape(label)}"></progress><small>${n} / ${total} 단계 완료</small></div>`}
+function progressGauge(done,total,label,unit='',status='running'){
+ const valid=Number.isFinite(done)&&Number.isFinite(total)&&total>0,n=valid?Math.max(0,Math.min(total,done)):0,measured=valid&&!!unit,complete=valid&&n===total;
+ const value=measured?`<strong>${Math.floor(n/total*100)}%</strong><span>${n}/${total}${escape(unit)}</span>`:complete?'<span>완료</span>':'';
+ const bar=!measured&&!complete&&['done','partial','error'].includes(status)?'':`<progress ${measured?`max="${total}" value="${n}"`:complete?'max="1" value="1"':''} aria-label="${escape(label)}"></progress>`;
+ return `<div class="work-progress"><div><span>${escape(label)}</span>${value}</div>${bar}</div>`;
+}
 
 async function openPaperWalkthrough(p,r){
  const epoch=renderEpoch;let report=r||{};

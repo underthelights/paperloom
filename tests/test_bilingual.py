@@ -100,7 +100,11 @@ class BilingualTests(unittest.TestCase):
 
     def test_failed_alignment_keeps_original_translation(self):
         self.doc();value=reader.auto_get('paper');value['blocks']={'block-0':{'ko':'원래 번역','highlights':[{'exact':'Method'}]}};reader.auto_put(value)
+        before=set(R.JOBS)
         with patch.object(R,'cli',side_effect=ValueError('test timeout')):reader.auto_worker('paper')
+        job=R.JOBS[next(iter(set(R.JOBS)-before))]
+        self.assertEqual(job['status'],'error');self.assertIn('test timeout',job['error'])
+        self.assertEqual(job['done'],0);self.assertEqual(job['unit'],'문단')
         current=reader.auto_get('paper');self.assertEqual(current['status'],'error')
         self.assertEqual(current['blocks']['block-0'],value['blocks']['block-0'])
 

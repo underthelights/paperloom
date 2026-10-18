@@ -7,13 +7,16 @@ from xml.etree import ElementTree as ET
 from bs4 import BeautifulSoup
 import desktop_ai
 import tensor_evidence
+from contextlib import nullcontext
+from cli_scheduler import Scheduler
 
 ROOT = Path(__file__).resolve().parent
 DATA = Path(os.environ.get('PAPERLOOM_DATA', ROOT/'data')).resolve()/'research'
 DB = DATA/'research.sqlite3'
 LOCK = threading.RLock()
 JOBS = {}
-ACTIVE = threading.Semaphore(1)
+ACTIVE = nullcontext()
+CLI_SCHEDULER = Scheduler(capacity=2, max_waiting=10)
 SKILLS = ROOT/'research-skills'
 
 def now(): return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
@@ -215,7 +218,7 @@ def state():
         p=dict(row)
         if isinstance(p['authors'],str):p['authors']=json.loads(p['authors'])
         papers.append(p)
-    return {'papers':papers,'jobs':saved_jobs(),'notion':meta.get('notion',{}),
+    return {'papers':papers,'jobs':saved_jobs(),'job_limits':{'parallel':CLI_SCHEDULER.capacity,'waiting':CLI_SCHEDULER.max_waiting},'notion':meta.get('notion',{}),
             'counts':{'candidates':sum(p['status']=='candidate' for p in papers),'papers':sum(p['status']!='candidate' for p in papers),'briefs':sum(p['report_count']>0 for p in papers)},
             'skills':json.loads((SKILLS/'PROVENANCE.json').read_text())}
 
@@ -229,7 +232,14 @@ def persist_job(jid):
     with db() as c: c.execute('INSERT OR REPLACE INTO jobs VALUES(?,?)',(jid,json.dumps(value,ensure_ascii=False)))
 
 def saved_jobs():
-    with db() as c: return [json.loads(r[0]) for r in c.execute('SELECT body FROM jobs ORDER BY rowid DESC LIMIT 30')]
+    with db() as c:stored=[json.loads(r[0]) for r in c.execute('SELECT body FROM jobs ORDER BY rowid DESC LIMIT 30')]
+    with LOCK:
+        merged={job['id']:job for job in stored}
+        merged.update({jid:{k:v for k,v in job.items() if k not in ('process','cancel')} for jid,job in JOBS.items()})
+    jobs=sorted(merged.values(),key=lambda j:j.get('created',''),reverse=True)
+    active=[j for j in jobs if j.get('status') in ('queued','running')]
+    terminal=[j for j in jobs if j.get('status') not in ('queued','running')]
+    return active+terminal[:30]
 
 def mark(jid,stage,message):
     with LOCK:
@@ -330,6 +340,20 @@ def collect_figures(aid,run):
     return figures
 
 def cli(jid,prompt,run,name,timeout=900,intake=False,reasoning=None):
+    def cancelled():
+        with LOCK:return JOBS.get(jid,{}).get('cancel',False)
+    def changed(state,position):
+        with LOCK:
+            job=JOBS.get(jid)
+            if not job:return
+            job.update(cli_status=state,queue_position=position)
+            if job.get('status') not in ('cancelled','error','done'):
+                job['status']='queued' if state=='queued' else 'running'
+    with CLI_SCHEDULER.slot(cancelled,changed):
+        return _cli(jid,prompt,run,name,timeout,intake,reasoning)
+
+
+def _cli(jid,prompt,run,name,timeout=900,intake=False,reasoning=None):
     executable=desktop_ai.codex_path()
     if not executable: raise ValueError('Codex CLI 설치와 로그인이 필요합니다.')
     output=run/(name+'.txt')
@@ -655,9 +679,9 @@ def start(pid):
     if p.get('pdf_sha256') and p.get('pdf_extraction')=='needs_ocr':raise ValueError('분석할 본문이 부족합니다. OCR 처리된 PDF를 추가하세요. 원본은 PDF 탭에서 읽을 수 있습니다.')
     with LOCK:
         active=[j for j in JOBS.values() if j['status'] in ('queued','running')]
-        if any(j['paper_id']==pid for j in active): raise ValueError('이 논문을 이미 분석 중입니다.')
+        if any(j['paper_id']==pid and j.get('kind','research' if j.get('stage') not in ('reader','bilingual-reader','organize','knowledge') else j.get('stage'))=='research' for j in active): raise ValueError('이 논문을 이미 분석 중입니다.')
         if len(active)>=10: raise ValueError('대기열은 10개 이하로 유지하세요.')
-        jid=uuid.uuid4().hex;JOBS[jid]={'id':jid,'paper_id':pid,'status':'queued','stage':'queued','created':now(),'log':[],'cancel':False,'error':'','owner_pid':os.getpid()}
+        jid=uuid.uuid4().hex;JOBS[jid]={'id':jid,'paper_id':pid,'kind':'research','status':'queued','stage':'queued','created':now(),'log':[],'cancel':False,'error':'','owner_pid':os.getpid()}
     persist_job(jid)
     threading.Thread(target=run_analysis,args=(jid,pid),daemon=True).start()
     return snapshot(jid)
