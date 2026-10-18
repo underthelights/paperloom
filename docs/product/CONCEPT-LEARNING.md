@@ -139,3 +139,5 @@ P2: 검증된 복습 스케줄러, 새로운 후속 논문과 기존 주장 차�
 ## 2026-10-18 구현 범위
 
 개념 학습 UI의 개념·논문 비교·관계 그래프·확인 질문, 개인 답변 저장과 노트 내보내기를 구현했다. `latent-action.json`에는 LAPA/Genie/UniVLA의 출처 기반 학습 자료가 포함된다. 다른 개념은 `/api/concept/study/generate`로 같은 구조의 자료를 생성한다. 실제 API는 GET `/api/concept/study/{id}`, POST `/api/concept/study/generate`, POST `/api/concept/study/progress`다. 답변은 사용자 확인 기록이며 자동 채점·숙련도 점수가 아니다. 간격 반복 일정, 새로운 개념용 Manim 장면 자동 생성, 외부 서비스 계정 연동은 이번 구현에 포함되지 않는다.
+
+질문 본문·참고 답안의 SHA256 revision을 개인 답변에 저장한다. 재생성으로 질문이 바뀌면 이전 답변과 질문 기록을 보존하고 ‘이해함’을 해제한다. 이전 화면의 지연 저장은 revision 불일치로 거부한다. 작업 취소는 오류로 바꾸지 않으며 기존 학습 자료를 유지한다.

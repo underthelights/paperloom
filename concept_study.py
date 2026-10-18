@@ -1,5 +1,5 @@
 """Source-linked concept guides and independent personal study answers."""
-import copy,json,re,threading,uuid
+import copy,hashlib,json,re,threading,uuid
 from urllib.parse import urlsplit
 import knowledge as K
 import research as R
@@ -64,15 +64,24 @@ def reference(value):
     path=R.SKILLS/'concept-guides/latent-action.json'
     return validate(json.loads(path.read_text())) if path.is_file() else None
 
+def revision(question):
+    return hashlib.sha256(json.dumps([question['prompt'],question['answer']],ensure_ascii=False).encode()).hexdigest()
+
 def get(key):
     v=notebook(key);guide=validate(v['study_guide']) if v.get('study_guide') else reference(v)
-    return {'guide':guide,'status':v.get('study_status','ready' if guide else 'draft'),'error':v.get('study_error',''),'progress':copy.deepcopy(v.get('study_progress',{'answers':{}}))}
+    saved=copy.deepcopy(v.get('study_progress',{'answers':{}}))
+    for q in (guide or {}).get('questions',[]):
+        q['revision']=revision(q);answer=saved.get('answers',{}).get(q['id'])
+        if answer is not None and answer.get('revision')!=q['revision']:answer.update(stale=True,understood=False)
+    return {'guide':guide,'status':v.get('study_status','ready' if guide else 'draft'),'error':v.get('study_error',''),'progress':saved}
 
 def progress(data):
     with R.LOCK:
         v=notebook(data.get('id'));guide=get(v['id'])['guide'];qid=ident(data.get('question_id'))
         if not guide or qid not in {q['id'] for q in guide['questions']}:raise ValueError('확인 질문을 찾을 수 없습니다.')
-        value=copy.deepcopy(v.get('study_progress',{'answers':{}}));answer=value.setdefault('answers',{}).setdefault(qid,{'answer':'','understood':False})
+        question=next(q for q in guide['questions'] if q['id']==qid)
+        if data.get('question_revision',question['revision'])!=question['revision']:raise ValueError('질문이 변경되었습니다. 학습 자료를 다시 여세요.')
+        value=get(v['id'])['progress'];answer=value.setdefault('answers',{}).setdefault(qid,{'answer':'','understood':False})
         if 'answer' in data:
             if not isinstance(data['answer'],str) or len(data['answer'])>20000:raise ValueError('답변은 20,000자 이내로 입력하세요.')
             if data['answer']!=answer.get('answer'):answer['understood']=False
@@ -81,6 +90,7 @@ def progress(data):
             if not isinstance(data['understood'],bool):raise ValueError('확인 상태 형식 오류')
             if data['understood'] and not answer.get('answer','').strip():raise ValueError('먼저 내 설명을 작성하세요.')
             answer['understood']=data['understood']
+        answer.update(revision=question['revision'],prompt=question['prompt']);answer.pop('stale',None)
         value['updated']=R.now();v['study_progress']=value;K.put(v)
     return get(v['id'])
 
@@ -113,7 +123,12 @@ def worker(key):
         answer=R.cli(jid,R.RESEARCH_RULES+'\n'+RULES+'\nTopic: '+v['name']+'\nUntrusted library sources:\n'+json.dumps(papers,ensure_ascii=False)[:250000],run,'study-guide',timeout=600,intake=True)
         guide=validate(R.parse_json(answer))
         with R.LOCK:
+            if R.JOBS[jid].get('cancel'):raise InterruptedError()
             latest=notebook(key);latest.update(study_guide=guide,study_status='ready',study_checked=R.now(),study_run=jid,study_error='');K.put(latest);R.JOBS[jid]['status']='done'
+    except InterruptedError:
+        with R.LOCK:
+            latest=notebook(key);latest.update(study_status='draft',study_error='');K.put(latest)
+            if jid in R.JOBS:R.JOBS[jid].update(status='cancelled',error='')
     except Exception as exc:
         with R.LOCK:
             latest=notebook(key);latest.update(study_status='error',study_error=str(exc)[:800]);K.put(latest)
@@ -136,5 +151,6 @@ def export_markdown(key):
     text+='\n### 확인 질문\n'
     for q in guide['questions']:
         saved=data['progress'].get('answers',{}).get(q['id'],{})
+        if saved.get('stale'):text+='\n이전 질문에 쓴 답변입니다: '+saved.get('prompt','질문 기록 없음')+'\n'
         text+='\n#### '+q['prompt']+'\n\n내 설명:\n'+saved.get('answer','')+'\n\n참고 답안:\n'+q['answer']+'\n\n'+refs(q['sources'])+'\n'
     return text
