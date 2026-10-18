@@ -48,3 +48,5 @@ body.reading-mode{grid-template-columns:240px minmax(500px,1fr)}.reading-mode .c
 .sentence-aligned .bilingual-ko{font-size:16px;line-height:1.85}
 
 .bilingual-ko,#reader-panel,.equation-derivation{font-family:"IBM Plex Sans KR",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+
+.sentence-reading-status{display:grid;grid-template-columns:auto auto;gap:4px 12px;align-items:center;font:12px/1.6 "IBM Plex Sans KR",sans-serif;color:var(--muted);min-width:240px}.sentence-reading-status progress{grid-column:1/-1;width:100%;height:4px;accent-color:var(--accent)}#bilingual-controls{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
