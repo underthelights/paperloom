@@ -12,6 +12,16 @@ class DiscoveryTests(unittest.TestCase):
         g=discovery.assemble(a,[b,c],[d],[]);edge=next(e for e in g['edges'] if e['source']=='W1' and e['target']=='W2')
         self.assertEqual(edge['coupling'],1);self.assertEqual(edge['cocitation'],1);self.assertEqual(edge['score'],1);self.assertEqual(edge['citations'],[])
         direct=next(e for e in g['edges'] if e['source']=='W1' and e['target']=='W3');self.assertEqual(direct['citations'],[{'from':'W1','to':'W3'}]);self.assertEqual(next(n for n in g['nodes'] if n['id']=='W5')['role'],'derivative')
+    def test_graph_counts_exclude_external_and_self_references(self):
+        seed=self.work('W1',['W1','W3','W3','W999'])
+        peer=self.work('W2',['W3']);prior=self.work('W3',[])
+        graph=discovery.assemble(seed,[peer,prior,prior],[],[])
+        nodes={n['id']:n for n in graph['nodes']}
+        self.assertEqual(len(nodes),3)
+        self.assertEqual(nodes['W1']['graph_references'],1)
+        self.assertEqual(nodes['W1']['graph_cited_by'],0)
+        self.assertEqual(nodes['W3']['graph_cited_by'],2)
+        self.assertEqual(nodes['W2']['role'],'related')
     def test_import_deduplicates_and_preserves_notes(self):
         w=self.work('W1',[]);g=discovery.assemble(w,[],[],[])
         with patch.object(discovery,'graph',return_value=g):

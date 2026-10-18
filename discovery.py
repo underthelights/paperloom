@@ -57,6 +57,8 @@ def cache_path(seed):
 def assemble(seed,works,citing,notices):
     unique={w['id']:w for w in [seed]+works+citing};nodes=list(unique.values());ids=set(unique);refs={w['id']:set(w['references']) for w in nodes};incoming={i:{w['id'] for w in nodes if i in refs[w['id']]} for i in ids};edges=[]
     for n in nodes:
+        n['graph_cited_by']=len(incoming[n['id']]-{n['id']})
+        n['graph_references']=len((refs[n['id']]&ids)-{n['id']})
         n['role']='seed' if n['id']==seed['id'] else 'prior' if n['id'] in refs[seed['id']] else 'derivative' if seed['id'] in refs[n['id']] else 'related'
     for i,a in enumerate(nodes):
         for b in nodes[i+1:]:

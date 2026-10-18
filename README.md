@@ -42,9 +42,9 @@ The build stages sanitized inputs even if private seeds exist locally. It exclud
 ## Release channels
 
 - `main`: stable code; `vX.Y.Z` tags create regular releases.
-- `develop`: development code; pushes create numbered prereleases after checks and a native smoke test.
+- `develop`: development code; pushes run CI without creating releases. To publish a tested development ZIP, manually run the **Release** workflow on `develop`.
 - Development builds use a separate **Paperloom Dev** data directory. They do not migrate or overwrite the stable library.
-- Release ZIPs contain an unsigned macOS arm64 app. Signing/notarization and automatic updates are not configured.
+- Release ZIPs contain an unsigned macOS arm64 app. Signing/notarization and automatic updates are not configured. A new GitHub release does not replace the installed app.
 
 See [release process](docs/RELEASING.md), [review policy](docs/REVIEW.md), and [known limitations](docs/LIMITATIONS.md).
 
