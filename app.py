@@ -17,6 +17,7 @@ import knowledge
 import workspace_links
 import tensor_motion
 import concept_study
+import concept_pipeline
 
 ROOT = Path(__file__).resolve().parent
 DATA = Path(os.environ.get('PAPERLOOM_DATA', ROOT / 'data')).resolve()
@@ -294,6 +295,7 @@ class Handler(BaseHTTPRequestHandler):
                 query=dict(__import__('urllib.parse',fromlist=['parse_qsl']).parse_qsl(urlparse(self.path).query))
                 return self.send(workspace_links.links(query.get('kind'),query.get('id')))
             if path=='/api/concepts': return self.send(knowledge.concepts())
+            if path.startswith('/api/concept/paper/'):return self.send(concept_pipeline.result(path.rsplit('/',1)[1]))
             if path.startswith('/api/people/'): return self.send(knowledge.people(path.rsplit('/',1)[1]))
             if path.startswith('/api/concept/study/'):
                 return self.send(concept_study.get(path.rsplit('/',1)[1]))
@@ -351,7 +353,7 @@ class Handler(BaseHTTPRequestHandler):
                 asset=(ROOT/'static'/path.lstrip('/')).resolve()
                 if not asset.is_relative_to((ROOT/'static/pdf-assets').resolve()) or not asset.is_file(): return self.send({'error':'Not found'},404)
                 return self.send(asset.read_bytes(),ctype='application/wasm' if asset.suffix=='.wasm' else 'application/octet-stream')
-            files={'/concept-study.js':'concept-study.js','/concept-study.css':'concept-study.css','/work-queue.js':'work-queue.js','/work-queue.css':'work-queue.css','/tensor-motion.js':'tensor-motion.js','/tensor-motion.css':'tensor-motion.css','/walkthrough-lab.js':'walkthrough-lab.js','/walkthrough-lab.css':'walkthrough-lab.css','/studio.css':'studio.css','/studio.js':'studio.js','/catalog-studio.css':'catalog-studio.css','/inbox-studio.css':'inbox-studio.css','/workspace-links.js':'workspace-links.js','/workspace-links.css':'workspace-links.css','/dreamzero-equations.json':'dreamzero-equations.json','/paper-walkthrough.js':'paper-walkthrough.js','/paper-walkthrough.css':'paper-walkthrough.css','/dreamzero-walkthrough.json':'dreamzero-walkthrough.json','/model-graph.js':'model-graph.js','/model-ecosystem.json':'model-ecosystem.json','/bilingual.js':'bilingual.js','/workspace.css':'workspace.css','/knowledge.js':'knowledge.js','/knowledge.css':'knowledge.css','/workflow.js':'workflow.js','/discovery.js':'discovery.js','/discovery.css':'discovery.css','/reader.js':'reader.js','/reader.css':'reader.css','/':'research.html','/editor.html':'index.html','/inbox.js':'inbox.js','/inbox.css':'inbox.css','/research.js':'research.js','/research.css':'research.css','/math.js':'math.js','/katex.min.css':'katex.min.css','/app.js':'app.js','/style.css':'style.css','/cloud.js':'cloud.js','/library.html':'library.html','/editor.js':'editor.js','/editor.css':'editor.css','/reader-vendor.js':'reader-vendor.js','/pdf.worker.mjs':'pdf.worker.mjs','/pdf-viewer.css':'pdf-viewer.css'}
+            files={'/paper-concepts.js':'paper-concepts.js','/paper-concepts.css':'paper-concepts.css','/concept-study.js':'concept-study.js','/concept-study.css':'concept-study.css','/work-queue.js':'work-queue.js','/work-queue.css':'work-queue.css','/tensor-motion.js':'tensor-motion.js','/tensor-motion.css':'tensor-motion.css','/walkthrough-lab.js':'walkthrough-lab.js','/walkthrough-lab.css':'walkthrough-lab.css','/studio.css':'studio.css','/studio.js':'studio.js','/catalog-studio.css':'catalog-studio.css','/inbox-studio.css':'inbox-studio.css','/workspace-links.js':'workspace-links.js','/workspace-links.css':'workspace-links.css','/dreamzero-equations.json':'dreamzero-equations.json','/paper-walkthrough.js':'paper-walkthrough.js','/paper-walkthrough.css':'paper-walkthrough.css','/dreamzero-walkthrough.json':'dreamzero-walkthrough.json','/model-graph.js':'model-graph.js','/model-ecosystem.json':'model-ecosystem.json','/bilingual.js':'bilingual.js','/workspace.css':'workspace.css','/knowledge.js':'knowledge.js','/knowledge.css':'knowledge.css','/workflow.js':'workflow.js','/discovery.js':'discovery.js','/discovery.css':'discovery.css','/reader.js':'reader.js','/reader.css':'reader.css','/':'research.html','/editor.html':'index.html','/inbox.js':'inbox.js','/inbox.css':'inbox.css','/research.js':'research.js','/research.css':'research.css','/math.js':'math.js','/katex.min.css':'katex.min.css','/app.js':'app.js','/style.css':'style.css','/cloud.js':'cloud.js','/library.html':'library.html','/editor.js':'editor.js','/editor.css':'editor.css','/reader-vendor.js':'reader-vendor.js','/pdf.worker.mjs':'pdf.worker.mjs','/pdf-viewer.css':'pdf-viewer.css'}
             if path not in files: return self.send({'error':'Not found'},404)
             name=files[path]
             self.send((ROOT/'static'/name).read_bytes(),ctype={'json':'application/json; charset=utf-8','html':'text/html; charset=utf-8','js':'text/javascript; charset=utf-8','mjs':'text/javascript; charset=utf-8','css':'text/css; charset=utf-8'}[name.split('.')[-1]])
@@ -367,6 +369,7 @@ class Handler(BaseHTTPRequestHandler):
             if path=='/api/concept/create': result=knowledge.create(d['name'],d.get('paper_id'),d.get('annotation_id'))
             elif path=='/api/research/motion':result=tensor_motion.start(d)
             elif path=='/api/concept/study/progress': result=concept_study.progress(d)
+            elif path=='/api/concept/paper/retry': result=concept_pipeline.start(d['id'],retry=True)
             elif path=='/api/concept/study/generate': result=concept_study.start(d)
             elif path=='/api/concept/edit': result=knowledge.edit(d)
             elif path=='/api/concept/generate': result=knowledge.start(d)

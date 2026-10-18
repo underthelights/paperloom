@@ -218,7 +218,7 @@ def state():
         p=dict(row)
         if isinstance(p['authors'],str):p['authors']=json.loads(p['authors'])
         papers.append(p)
-    return {'papers':papers,'jobs':saved_jobs(),'job_limits':{'parallel':CLI_SCHEDULER.capacity,'waiting':CLI_SCHEDULER.max_waiting},'features':{'concept_study':True},'notion':meta.get('notion',{}),
+    return {'papers':papers,'jobs':saved_jobs(),'job_limits':{'parallel':CLI_SCHEDULER.capacity,'waiting':CLI_SCHEDULER.max_waiting},'features':{'concept_study':True,'concept_pipeline':True},'notion':meta.get('notion',{}),
             'counts':{'candidates':sum(p['status']=='candidate' for p in papers),'papers':sum(p['status']!='candidate' for p in papers),'briefs':sum(p['report_count']>0 for p in papers)},
             'skills':json.loads((SKILLS/'PROVENANCE.json').read_text())}
 
@@ -436,6 +436,9 @@ def run_analysis(jid,pid):
             figures=collect_figures(p['arxiv'],run) if p.get('arxiv') else []
             with LOCK:
                 p=get(pid);p.update(references=refs,sources=sources,last_run=jid,figures=figures,citation_context=citation_context(run));save(p)
+            import concept_pipeline
+            try:concept_pipeline.start(pid,source_run=jid)
+            except Exception as error:mark(jid,'sources','개념 정리 시작 실패 · 원문 분석은 계속합니다: '+str(error)[:200])
             mark(jid,'discovery','공식 코드·저자 소속·연구실·최근 연구 확인')
             prompt=RESEARCH_RULES+'\nToday: '+now()+'''\nRead paper.txt and paper-pdf.txt in this directory. A local uploaded PDF may have no arXiv or public URL. Never substitute a similar-titled paper or infer an official repository from its name; verify exact identity first. PDF text extraction is not recovered TeX; equations, tables and reading order may be incomplete. Preserve unknowns. Search the web for the paper official project/code and author/lab pages, then recent lab works (last 24 months as of today). You must actually open primary URLs. Return ONLY JSON with keys:
 {"code":{"url":"official GitHub root or empty","evidence_url":"paper/project page linking repo","reason":""},"project_urls":[],"affiliations":[{"author":"","paper_affiliation":"","current_affiliation":"확인 불가 if unknown","lab":"확인 불가 if unknown","evidence_urls":[],"note":""}],"recent_work":[{"title":"","url":"primary paper URL","date":"YYYY-MM or explicit unknown","lab":"","relationship":"why connected; no unproven membership","evidence_url":"lab publication page"}],"limitations":[]}
@@ -488,6 +491,10 @@ Do not claim code was cloned unless code-status.json says so. Cite URLs in every
                 p=get(pid);p['reports'].append(report);p['status']='review' if review.get('verdict')!='pass' else 'analyzed';save(p)
                 JOBS[jid].update(status='done',stage='done')
             mark(jid,'done','분석 저장 완료 · 원문 근거와 검수 결과를 확인하세요.')
+            import concept_pipeline
+            try:concept_pipeline.start(pid)
+            except Exception as error:
+                mark(jid,'done','개념 정리 시작 실패 · 공통 개념에서 재시도: '+str(error)[:200])
     except InterruptedError:
         with LOCK: JOBS[jid]['status']='cancelled'
     except Exception as e:

@@ -69,8 +69,9 @@ class ResearchTests(unittest.TestCase):
         def agent(*args,**kwargs):
             current=research.get(p['id']);current['notes']='written while analyzing';research.save(current)
             return responses.pop(0)
-        with patch.object(research,'collect',return_value=('paper content',[],[])),patch.object(research,'cli',side_effect=agent):
+        with patch.object(research,'collect',return_value=('paper content',[],[])),patch.object(research,'cli',side_effect=agent),patch('concept_pipeline.start') as concept_hook:
             research.run_analysis(jid,p['id'])
+        concept_hook.assert_any_call(p['id'])
         final=research.get(p['id']);self.assertEqual(final['notes'],'written while analyzing');self.assertEqual(final['status'],'review');self.assertEqual(len(final['reports']),1);self.assertEqual(research.JOBS[jid]['status'],'done')
         research.JOBS.pop(jid)
 
