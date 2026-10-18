@@ -39,11 +39,17 @@ def source(pid,version=None):
     return p,rid,text
 
 def start(pid,retry=False,source_run=None):
-    p,rid,_=source(pid,source_run);init()
+    init()
+    if retry and not source_run:
+        previous=load(pid)
+        if previous.get('report_id')==R.get(pid).get('last_run'):source_run=previous['report_id']
+    p,rid,_=source(pid,source_run)
     with R.LOCK,R.db() as c:
         c.execute('BEGIN IMMEDIATE');row=c.execute('SELECT body FROM concept_pipeline WHERE paper_id=?',(pid,)).fetchone();old=json.loads(row[0]) if row else {}
         if old.get('report_id')==rid and (old.get('status') in ('queued','running') or old.get('status')=='ready' and not retry):return old
-        token=uuid.uuid4().hex;value={'paper_id':pid,'report_id':rid,'token':token,'status':'queued','completed':0,'total':0,'error':'','owner_pid':os.getpid()};write(c,value)
+        token=uuid.uuid4().hex;value={'paper_id':pid,'report_id':rid,'token':token,'status':'queued','completed':0,'total':0,'error':'','owner_pid':os.getpid()}
+        if old.get('report_id')==rid and old.get('status')=='error' and re.fullmatch('[a-f0-9]{32}',old.get('token','')):value['reuse_token']=old['token']
+        write(c,value)
     try:threading.Thread(target=worker,args=(pid,rid,token),daemon=True).start()
     except Exception:
         with R.db() as c:value.update(status='error',error='개념 정리를 시작하지 못했습니다.');write(c,value)
@@ -90,7 +96,7 @@ def validate(result,p,text):
         if not isinstance(aliases,list) or len(aliases)>8 or any(not isinstance(a,str) or not 0<len(a)<=120 for a in aliases):raise ValueError('개념 별칭 형식 오류')
         # An alias must actually occur in the source; it never resolves another notebook by itself.
         aliases=[a for a in aliases if plain(a) in plain(text)]
-        if not any(plain(n) in plain(text) for n in [name,*aliases]):raise ValueError('개념 용어를 원문에서 찾을 수 없습니다.')
+        if not any(plain(n) in plain(text) for n in [name,*aliases]):raise ValueError('개념 용어를 원문에서 찾을 수 없습니다: '+name)
         guide=S.validate(item.get('guide'));seen.add(key(name));out.append({**item,'name':name.strip(),'aliases':aliases,'guide':guide})
     return out
 
@@ -142,6 +148,7 @@ def commit(pid,rid,token,items,related=()):
             c.execute('INSERT OR REPLACE INTO knowledge VALUES(?,?,?)',(v['id'],'concept',json.dumps(v,ensure_ascii=False)))
             record={k:item[k] for k in ('name','definition','role','evidence') if k in item};record['id']=v['id']
             c.execute('INSERT OR REPLACE INTO concept_evidence VALUES(?,?,?,?,1)',(pid,v['id'],rid,json.dumps(record,ensure_ascii=False)));active.append(v['id'])
+        accepted_related=[]
         for link in related:
             cid=link['concept_id']
             if cid in active:continue
@@ -150,7 +157,7 @@ def commit(pid,rid,token,items,related=()):
             if pid not in v['papers']:v['papers'].append(pid);v.setdefault('pipeline_papers',[]).append(pid)
             v.setdefault('paper_connections',{})[pid]={'type':link['type'],'reason':link['reason'],'evidence':link['evidence'],'report_id':rid,'active':True};v['updated']=R.now()
             c.execute('UPDATE knowledge SET body=? WHERE id=?',(json.dumps(v,ensure_ascii=False),cid))
-            c.execute('INSERT OR REPLACE INTO concept_evidence VALUES(?,?,?,?,1)',(pid,cid,rid,json.dumps({'id':cid,'connection_only':True,**link},ensure_ascii=False)));active.append(cid)
+            c.execute('INSERT OR REPLACE INTO concept_evidence VALUES(?,?,?,?,1)',(pid,cid,rid,json.dumps({'id':cid,'connection_only':True,**link},ensure_ascii=False)));active.append(cid);accepted_related.append(link)
         for row in c.execute('SELECT concept_id FROM concept_evidence WHERE paper_id=? AND active=1',(pid,)).fetchall():
             cid=row[0]
             if cid in active:continue
@@ -160,7 +167,7 @@ def commit(pid,rid,token,items,related=()):
             if v and pid in v.get('pipeline_papers',[]):
                 v['pipeline_papers'].remove(pid);v['papers']=[x for x in v['papers'] if x!=pid];v['updated']=R.now()
             if v:c.execute('UPDATE knowledge SET body=? WHERE id=?',(json.dumps(v,ensure_ascii=False),cid))
-        state.update(status='ready',completed=len(items),total=len(items),connections=list(related),error='');write(c,state)
+        state.update(status='ready',completed=len(items),total=len(items),connections=accepted_related,error='');write(c,state)
     return True
 
 def worker(pid,rid,token):
@@ -181,8 +188,20 @@ def worker(pid,rid,token):
                 state.update(status='running',job_id=jid);write(c,state)
         R.persist_job(jid)
         context={'paper':{k:p.get(k) for k in ('id','title','url','arxiv')},'paper_url':p.get('url') or '/api/research/pdf/'+pid,'source_text':text[:190000],'report':p['reports'][-1] if p.get('reports') and p['reports'][-1]['id']==rid else {'status':'unavailable','reason':'Detailed analysis pending. Read the supplied original; verify code independently or mark unverified.'},'existing_concepts':[{'id':v['id'],'name':v['name'],'aliases':v.get('aliases',[])} for v in K.concept_index()]}
-        response=R.cli(jid,R.RESEARCH_RULES+'\n'+S.RULES+'\n'+RULES+'\n'+json.dumps(context,ensure_ascii=False),run,'concepts',timeout=1200,intake=True)
-        payload=R.parse_json(response);items=validate(payload,p,text);related=connections(payload,p,text)
+        prompt=R.RESEARCH_RULES+'\n'+S.RULES+'\n'+RULES+'\n'+json.dumps(context,ensure_ascii=False)
+        response=None;reuse=state.get('reuse_token','')
+        if re.fullmatch('[a-f0-9]{32}',reuse):
+            for name in ('concepts-repair.txt','concepts.txt'):
+                previous=R.DATA/'concept-runs'/reuse/name
+                if previous.is_file() and previous.stat().st_size<=1500000:response=previous.read_text();break
+        if response is None:response=R.cli(jid,prompt,run,'concepts',timeout=1200,intake=True)
+        for attempt in range(2):
+            try:
+                payload=R.parse_json(response);items=validate(payload,p,text);related=connections(payload,p,text);break
+            except (ValueError,KeyError,TypeError,AttributeError) as error:
+                if attempt:raise
+                repair=prompt+'\nValidation rejected the draft. Correct ONLY unsupported names, aliases, quotes, URLs, schema or references; keep valid detailed explanations. Canonical concept names must be exact source terms, not invented descriptive titles. Return the complete corrected JSON payload, no commentary.\nValidation: '+str(error)+'\nUNTRUSTED DRAFT:\n'+response[:500000]
+                response=R.cli(jid,repair,run,'concepts-repair',timeout=900,intake=True)
         with R.LOCK:
             if R.JOBS[jid].get('cancel'):raise InterruptedError()
             done=commit(pid,rid,token,items,related);R.JOBS[jid].update(status='done' if done else 'cancelled')

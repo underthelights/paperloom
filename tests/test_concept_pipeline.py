@@ -7,7 +7,7 @@ class ConceptPipelineTests(unittest.TestCase):
     tearDown=test_knowledge.KnowledgeTests.tearDown
     def setUp(self):
         test_knowledge.KnowledgeTests.setUp(self)
-        P.init();self.pid='1';self.rid='report-one';self.token='token-one'
+        P.init();self.pid='1';self.rid='report-one';self.token='a'*32
         self.paper=R.get(self.pid);self.paper.update(url='https://example.com/paper',reports=[{'id':self.rid}],last_run='test-run');R.save(self.paper)
         self.text='Flow Matching learns a continuous transport between noise and data distributions. FM denotes Flow Matching in this paper. '
         run=R.DATA/'runs'/self.rid;run.mkdir(parents=True);(run/'paper.txt').write_text(self.text*30)
@@ -142,3 +142,37 @@ class ConceptPipelineTests(unittest.TestCase):
         index=K.concept_index();self.assertEqual(index[0]['id'],v['id'])
         for field in ('notes','markdown','study_guide','study_progress'):self.assertNotIn(field,index[0])
         self.assertEqual(K.get(v['id'])['notes'],'Private explanation')
+    def invalid_payload(self):
+        item=copy.deepcopy(self.item);item.update(name='Invented descriptive concept',aliases=[])
+        return json.dumps({'concepts':[item]})
+    def test_invalid_generation_repaired_once_with_source_and_feedback(self):
+        with patch.object(R,'cli',side_effect=[self.invalid_payload(),json.dumps({'concepts':[self.item]})]) as cli:
+            P.worker(self.pid,self.rid,self.token)
+        self.assertEqual(P.load(self.pid)['status'],'ready');self.assertEqual(len(K.concepts()),1)
+        self.assertEqual([call.args[3] for call in cli.call_args_list],['concepts','concepts-repair'])
+        repair=cli.call_args_list[1].args[1]
+        self.assertIn('Invented descriptive concept',repair);self.assertIn(self.text.strip(),repair)
+        self.assertIn('개념 용어를 원문에서 찾을 수 없습니다',repair)
+    def test_second_invalid_generation_stops_and_preserves_existing_state(self):
+        self.commit();before=K.concepts();self.queue()
+        with patch.object(R,'cli',return_value=self.invalid_payload()) as cli:P.worker(self.pid,self.rid,self.token)
+        self.assertEqual(cli.call_count,2);self.assertEqual(P.load(self.pid)['status'],'error');self.assertEqual(K.concepts(),before)
+    def test_retry_reuses_failed_draft_and_skips_full_generation(self):
+        oldrun=R.DATA/'concept-runs'/self.token;oldrun.mkdir(parents=True)
+        (oldrun/'concepts.txt').write_text(self.invalid_payload())
+        with R.db() as c:
+            state=P.load(self.pid);state.update(status='error');P.write(c,state)
+        oldtoken=self.token
+        with patch.object(P.threading,'Thread'):state=P.start(self.pid,retry=True)
+        self.assertEqual(state['reuse_token'],oldtoken)
+        with patch.object(R,'cli',return_value=json.dumps({'concepts':[self.item]})) as cli:P.worker(self.pid,self.rid,state['token'])
+        self.assertEqual([call.args[3] for call in cli.call_args_list],['concepts-repair'])
+        self.assertEqual(P.load(self.pid)['status'],'ready')
+    def test_retry_prefers_repaired_draft_and_does_not_repair_valid_payload(self):
+        oldrun=R.DATA/'concept-runs'/self.token;oldrun.mkdir(parents=True)
+        (oldrun/'concepts.txt').write_text(self.invalid_payload());(oldrun/'concepts-repair.txt').write_text(json.dumps({'concepts':[self.item]}))
+        with R.db() as c:
+            state=P.load(self.pid);state.update(status='error');P.write(c,state)
+        with patch.object(P.threading,'Thread'):state=P.start(self.pid,retry=True)
+        with patch.object(R,'cli') as cli:P.worker(self.pid,self.rid,state['token'])
+        self.assertFalse(cli.called);self.assertEqual(P.load(self.pid)['status'],'ready')
