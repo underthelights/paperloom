@@ -1,6 +1,19 @@
 'use strict';
 (function(){
  const toggle=document.getElementById('toggle-side'),menu=document.getElementById('secondary-views');
+ const rail=document.querySelector('.library'),bar=document.querySelector('.topbar'),search=rail.querySelector('.search'),field=document.getElementById('search');
+ rail.setAttribute('aria-label','작업공간 탐색');
+ rail.querySelector('.brand').setAttribute('aria-label','Paperloom');
+ bar.querySelector('.breadcrumb').textContent='paperloom';
+ bar.insertBefore(search,bar.lastElementChild);
+ field.placeholder='논문·저자·개념 검색';field.oninput=null;
+ field.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();openCatalog({q:field.value.trim()})}});
+ const theme=document.getElementById('theme');rail.querySelector('footer').prepend(theme);
+ if(!theme.querySelector('.rail-label')){const label=document.createElement('span');label.className='rail-label';label.textContent='테마';theme.append(label)}
+ const work=document.createElement('span');work.id='workspace-jobs';work.setAttribute('role','status');bar.lastElementChild.prepend(work);
+ function syncWork(){const active=state?.jobs?.filter(j=>['queued','running'].includes(j.status))||[];work.hidden=!active.length;work.textContent=active.length?'분석 '+active.length:''}
+ window.addEventListener('paperloom-state-changed',syncWork);syncWork();
+
  function sync(){
   const visible=document.body.classList.contains('context-open');
   toggle.setAttribute('aria-expanded',String(visible));
