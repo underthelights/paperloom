@@ -15,6 +15,7 @@ import discovery
 import paperloom_workflow as workflow
 import knowledge
 import workspace_links
+import tensor_motion
 
 ROOT = Path(__file__).resolve().parent
 DATA = Path(os.environ.get('PAPERLOOM_DATA', ROOT / 'data')).resolve()
@@ -270,6 +271,21 @@ class Handler(BaseHTTPRequestHandler):
         if not self.allowed(): return self.send({'error':'Invalid Host'},403)
         path=urlparse(self.path).path
         try:
+            if path.startswith('/api/research/source/'):
+                query=dict(__import__('urllib.parse',fromlist=['parse_qsl']).parse_qsl(urlparse(self.path).query))
+                return self.send(tensor_motion.code_excerpt(path.rsplit('/',1)[1],query.get('url','')))
+            if path.startswith('/api/research/motion/video/'):
+                pid,digest=path.split('/')[-2:];file=tensor_motion.video_file(pid,digest);raw=file.read_bytes();headers={'Accept-Ranges':'bytes'}
+                if 'download' in urlparse(self.path).query:headers['Content-Disposition']='attachment; filename=tensor-operation.mp4'
+                match=re.fullmatch(r'bytes=(\d+)-(\d*)',self.headers.get('Range',''))
+                if match:
+                    start=int(match[1]);end=min(int(match[2]) if match[2] else len(raw)-1,len(raw)-1)
+                    if start>end:return self.send(b'',416,headers={'Content-Range':f'bytes */{len(raw)}'})
+                    headers['Content-Range']=f'bytes {start}-{end}/{len(raw)}';return self.send(raw[start:end+1],206,'video/mp4',headers)
+                return self.send(raw,ctype='video/mp4',headers=headers)
+            if path.startswith('/api/research/motion/'):
+                query=dict(__import__('urllib.parse',fromlist=['parse_qsl']).parse_qsl(urlparse(self.path).query))
+                return self.send(tensor_motion.get_status(path.rsplit('/',1)[1],query.get('mode','training'),query.get('step',''),int(query.get('row_index',-1))))
             if path.startswith('/api/reader/auto/'): return self.send(reader.auto_get(path.rsplit('/',1)[1]))
             if path.startswith('/api/discovery/progress/'):return self.send(discovery.progress(path.rsplit('/',1)[1]))
             if path=='/api/catalog': return self.send(knowledge.catalog(dict(__import__('urllib.parse',fromlist=['parse_qsl']).parse_qsl(urlparse(self.path).query))))
@@ -332,7 +348,7 @@ class Handler(BaseHTTPRequestHandler):
                 asset=(ROOT/'static'/path.lstrip('/')).resolve()
                 if not asset.is_relative_to((ROOT/'static/pdf-assets').resolve()) or not asset.is_file(): return self.send({'error':'Not found'},404)
                 return self.send(asset.read_bytes(),ctype='application/wasm' if asset.suffix=='.wasm' else 'application/octet-stream')
-            files={'/walkthrough-lab.js':'walkthrough-lab.js','/walkthrough-lab.css':'walkthrough-lab.css','/studio.css':'studio.css','/studio.js':'studio.js','/catalog-studio.css':'catalog-studio.css','/inbox-studio.css':'inbox-studio.css','/workspace-links.js':'workspace-links.js','/workspace-links.css':'workspace-links.css','/dreamzero-equations.json':'dreamzero-equations.json','/paper-walkthrough.js':'paper-walkthrough.js','/paper-walkthrough.css':'paper-walkthrough.css','/dreamzero-walkthrough.json':'dreamzero-walkthrough.json','/model-graph.js':'model-graph.js','/model-ecosystem.json':'model-ecosystem.json','/bilingual.js':'bilingual.js','/workspace.css':'workspace.css','/knowledge.js':'knowledge.js','/knowledge.css':'knowledge.css','/workflow.js':'workflow.js','/discovery.js':'discovery.js','/discovery.css':'discovery.css','/reader.js':'reader.js','/reader.css':'reader.css','/':'research.html','/editor.html':'index.html','/inbox.js':'inbox.js','/inbox.css':'inbox.css','/research.js':'research.js','/research.css':'research.css','/math.js':'math.js','/katex.min.css':'katex.min.css','/app.js':'app.js','/style.css':'style.css','/cloud.js':'cloud.js','/library.html':'library.html','/editor.js':'editor.js','/editor.css':'editor.css','/reader-vendor.js':'reader-vendor.js','/pdf.worker.mjs':'pdf.worker.mjs','/pdf-viewer.css':'pdf-viewer.css'}
+            files={'/tensor-motion.js':'tensor-motion.js','/tensor-motion.css':'tensor-motion.css','/walkthrough-lab.js':'walkthrough-lab.js','/walkthrough-lab.css':'walkthrough-lab.css','/studio.css':'studio.css','/studio.js':'studio.js','/catalog-studio.css':'catalog-studio.css','/inbox-studio.css':'inbox-studio.css','/workspace-links.js':'workspace-links.js','/workspace-links.css':'workspace-links.css','/dreamzero-equations.json':'dreamzero-equations.json','/paper-walkthrough.js':'paper-walkthrough.js','/paper-walkthrough.css':'paper-walkthrough.css','/dreamzero-walkthrough.json':'dreamzero-walkthrough.json','/model-graph.js':'model-graph.js','/model-ecosystem.json':'model-ecosystem.json','/bilingual.js':'bilingual.js','/workspace.css':'workspace.css','/knowledge.js':'knowledge.js','/knowledge.css':'knowledge.css','/workflow.js':'workflow.js','/discovery.js':'discovery.js','/discovery.css':'discovery.css','/reader.js':'reader.js','/reader.css':'reader.css','/':'research.html','/editor.html':'index.html','/inbox.js':'inbox.js','/inbox.css':'inbox.css','/research.js':'research.js','/research.css':'research.css','/math.js':'math.js','/katex.min.css':'katex.min.css','/app.js':'app.js','/style.css':'style.css','/cloud.js':'cloud.js','/library.html':'library.html','/editor.js':'editor.js','/editor.css':'editor.css','/reader-vendor.js':'reader-vendor.js','/pdf.worker.mjs':'pdf.worker.mjs','/pdf-viewer.css':'pdf-viewer.css'}
             if path not in files: return self.send({'error':'Not found'},404)
             name=files[path]
             self.send((ROOT/'static'/name).read_bytes(),ctype={'json':'application/json; charset=utf-8','html':'text/html; charset=utf-8','js':'text/javascript; charset=utf-8','mjs':'text/javascript; charset=utf-8','css':'text/css; charset=utf-8'}[name.split('.')[-1]])
@@ -346,6 +362,7 @@ class Handler(BaseHTTPRequestHandler):
             if length<=0 or length>90*1024*1024: raise ValueError('요청 크기는 90MB 이하만 지원합니다.')
             d=json.loads(self.rfile.read(length)); path=urlparse(self.path).path
             if path=='/api/concept/create': result=knowledge.create(d['name'],d.get('paper_id'),d.get('annotation_id'))
+            elif path=='/api/research/motion':result=tensor_motion.start(d)
             elif path=='/api/concept/edit': result=knowledge.edit(d)
             elif path=='/api/concept/generate': result=knowledge.start(d)
             elif path=='/api/concept/render': result=knowledge.video(d)

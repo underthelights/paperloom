@@ -22,6 +22,7 @@ subprocess.run([sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean',
     '--add-data', f'{public / "research-skills"}{os.pathsep}research-skills',
     '--add-data', f'{public / "research-seed.json"}{os.pathsep}.',
     '--add-data', f'{root / "manim_scenes.py"}{os.pathsep}.',
+    '--add-data', f'{root / "tensor_scenes.py"}{os.pathsep}.',
     '--hidden-import', 'pypdf', '--hidden-import', 'bs4', 'app.py'], check=True)
 seed = root / 'build/seed'
 seed.mkdir(parents=True, exist_ok=True)

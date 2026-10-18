@@ -60,7 +60,7 @@ python3 -m venv "$HOME/.paperloom-manim"
 
 Set `PAPERLOOM_MANIM_PYTHON` to that Python executable, or write `{"python":"/absolute/path/to/python"}` to `~/Library/Application Support/Paperloom/manim-runtime.json`.
 
-Scenes are trusted, fixed Python templates with numeric parameters. The app does not execute AI-generated animation code. Arbitrary equations are explained in notebooks; only the two supplied scene templates are currently animated.
+Scenes are trusted, fixed Python templates with numeric parameters. The app does not execute AI-generated animation code. The paper walkthrough also renders source-bound tensor operations in `TensorTraceScene`: training/inference paths, splitting, concatenation, patch projection, attention and reductions. Select a stage or individual operation to play its local MP4 and inspect pinned source, equations and recorded derivations. DreamZero-specific diagrams require the matching audited commit and dimensions; other profiles use labeled shape diagrams. These videos visualize recorded shapes, not measured model execution. Generated clips are cached by analysis and scene content, with up to 128 recent clips retained per paper.
 
 ## Data and evidence
 
