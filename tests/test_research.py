@@ -74,6 +74,25 @@ class ResearchTests(unittest.TestCase):
         final=research.get(p['id']);self.assertEqual(final['notes'],'written while analyzing');self.assertEqual(final['status'],'review');self.assertEqual(len(final['reports']),1);self.assertEqual(research.JOBS[jid]['status'],'done')
         research.JOBS.pop(jid)
 
+    def test_new_paper_publishes_dedicated_trace_and_cannot_bypass_failed_gate(self):
+        research.import_candidates([{'Title':'Automatic tensor trace fixture'}])
+        p=research.all_records()[0];p.update(arxiv='2303.04137',url='https://arxiv.org/abs/2303.04137');research.save(p)
+        jid='tensor-pipeline-fixture';research.JOBS[jid]={'id':jid,'paper_id':p['id'],'cancel':False,'status':'queued','log':[]}
+        report={k:'source-supported fixture' for k in ['tldr','eli5','overview','method','experiments','code','labs','limitations','related_work','tensor_trace']};report.update(sources=[],checks=[])
+        trace={'steps':[{'title':'Actual source path'}],'execution_profile':{'config':'model.yaml'},
+               'validation':{'status':'needs_review','issues':['Missing inference evidence']}}
+        responses=[json.dumps({'code':{'url':'','reason':'unavailable'}}),json.dumps(report),json.dumps({'verdict':'pass','issues':[],'corrections':[]})]
+        try:
+            with patch.object(research,'collect',return_value=('paper content',[],[])),patch.object(research,'cli',side_effect=responses),patch.object(research,'analyze_tensor_trace',return_value=(trace,[])) as stage:
+                research.run_analysis(jid,p['id'])
+            stage.assert_called_once()
+            result=research.get(p['id'])
+            self.assertEqual(result['reports'][-1]['walkthrough'],trace)
+            self.assertEqual(result['status'],'review')
+            self.assertIn('Missing inference evidence',result['reports'][-1]['review']['issues'])
+            self.assertTrue((research.DATA/'runs'/jid/'code-inventory.json').exists())
+        finally:research.JOBS.pop(jid)
+
 
 
     def test_state_projects_summaries_without_loading_reports(self):

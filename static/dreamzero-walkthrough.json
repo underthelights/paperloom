@@ -1,26 +1,70 @@
 {
   "title": "DreamZero · 관측에서 행동까지",
-  "scope": "고정 커밋 ab790c198f의 정적 코드 대조 · 2026-10-18. 실제 모델 forward/로봇 실행을 측정하지 않았습니다. B/T/F/h/w/A/S는 입력과 resolved config에 의존하는 기호입니다. 이 해설은 DreamZero에만 적용합니다. 각 단계의 ‘텐서 내부’에서 논문이 생략한 축·합산·broadcast·mask·gradient 전제를 코드 근거, 수학적 유도, 예시로 구분합니다.",
+  "scope": "공식 코드 고정 커밋 ab790c198fbce33503358efbbd4187ce9a89adf3의 Wan2.1 DROID LoRA 설정 정적 추적. scripts/train/droid_training_lora.sh의 CLI와 YAML·transform·모델 코드를 대조했다. 실제 checkpoint 로드, Hydra resolve, dataset batch, GPU forward는 실행하지 않았다. B/T/A/S 등 runtime 값은 기호로 남기며 T=33 예시는 조건부 shape 산술이다. 기존 2×2 교육용 배열은 이 실제 설정 추적의 근거가 아니다.",
   "steps": [
+    {
+      "id": "camera-mosaic",
+      "title": "세 카메라를 352×640 영상으로 배치",
+      "explanation": "실제 DROID transform은 wrist를 width축 np.repeat(...,2)로 펼쳐 위쪽에 넣고 왼쪽·오른쪽 exterior를 아래에 넣는다. temporal 길이는 늘지 않는다. 주석과 달리 외부카메라 drop은 비활성이다.",
+      "operation": "mosaic",
+      "input_shape": "[B,T,3 views,176,320,3]",
+      "output_shape": "[B,T,352,640,3]",
+      "equation": "wrist_wide[...,2j]=wrist_wide[...,2j+1]=wrist[...,j]",
+      "mode": "shared",
+      "evidence": [
+        {
+          "label": "고정 코드·설정",
+          "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/transform/dreamzero_cotrain.py#L309-L356"
+        }
+      ],
+      "verification": "source",
+      "mechanics": [],
+      "concepts": [
+        "World Action Models"
+      ],
+      "shape_trace": [
+        {
+          "title": "세 카메라를 352×640 영상으로 배치",
+          "explanation": "wrist_wide[...,2j]=wrist_wide[...,2j+1]=wrist[...,j]",
+          "input_shape": "[B,T,3 views,176,320,3]",
+          "output_shape": "[B,T,352,640,3]",
+          "equation": "wrist_wide[...,2j]=wrist_wide[...,2j+1]=wrist[...,j]",
+          "assumptions": "선택 설정에 대한 정적 shape 추적. 실제 forward tensor dump가 아님.",
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "고정 코드·설정",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/transform/dreamzero_cotrain.py#L309-L356"
+            }
+          ],
+          "operation": "wrist_wide[...,2j]=wrist_wide[...,2j+1]=wrist[...,j]"
+        }
+      ]
+    },
     {
       "id": "pixels",
       "title": "카메라 프레임을 모델의 축 순서로 정리",
-      "explanation": "시간 순서로 들어온 영상에서 채널 축을 앞으로 옮긴다. 축 이동은 내용의 압축이 아니다. uint8 픽셀은 /255 및 정규화 경로를 거친다. B는 배치, T는 원본 프레임 수, H/W는 영상 크기다.",
+      "explanation": "3개 카메라를 합친 DROID mosaic이 입력이다. 선택 설정에서 각 view는 176×320, mosaic은 352×640이다. BTHWC→BCTHW 축 변경 후 uint8에만 /255 및 normalize_video 경로를 적용하고 [-1,1] assertion을 검사한다. T·B는 실제 sample에서 확인해야 한다.",
       "operation": "permute",
-      "input_shape": "[B,T,H,W,C]",
-      "output_shape": "[B,C,T,H,W]",
+      "input_shape": "[B,T,352,640,3]",
+      "output_shape": "[B,3,T,352,640]",
       "equation": "x[b,t,h,w,c] → x′[b,c,t,h,w]",
       "mode": "shared",
       "evidence": [
         {
           "label": "고정 커밋 코드",
           "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L603-L660"
+        },
+        {
+          "label": "고정 코드·설정",
+          "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/scripts/train/droid_training_lora.sh#L61-L98"
+        },
+        {
+          "label": "고정 코드·설정",
+          "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/transform/dreamzero_cotrain.py#L309-L356"
         }
       ],
       "verification": "source",
-      "concepts": [
-        "World Action Models"
-      ],
       "mechanics": [
         {
           "title": "축 이름은 저장 순서와 다르다",
@@ -28,8 +72,8 @@
           "input_shape": "[B,T,H,W,C]",
           "output_shape": "[B,C,T,H,W]",
           "equation": "y[b,c,t,h,w] = x[b,t,h,w,c]",
-          "basis": "mathematical",
           "assumptions": "일반적인 strided tensor 의미. 실제 copy 여부는 연산·contiguity에 따라 다름.",
+          "basis": "mathematical",
           "evidence": []
         },
         {
@@ -38,8 +82,8 @@
           "input_shape": "[B,C,T,H,W]",
           "output_shape": "[B,T,C,H,W] → [B*T,C,H,W]",
           "equation": "linear index(BTCHW) = ((((b·T+t)·C+c)·H+h)·W+w)",
-          "basis": "mathematical",
           "assumptions": "원소 수만 같아도 의미가 같은 tensor는 아니다.",
+          "basis": "mathematical",
           "evidence": []
         },
         {
@@ -48,14 +92,81 @@
           "input_shape": "uint8 [B,C,T,H,W]",
           "output_shape": "floating tensor, 동일 shape",
           "equation": "u = float(pixel)/255",
-          "basis": "code",
           "assumptions": "",
+          "basis": "code",
           "evidence": [
             {
               "label": "해당 코드",
               "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L622-L660"
             }
           ]
+        }
+      ],
+      "concepts": [
+        "World Action Models"
+      ],
+      "shape_trace": [
+        {
+          "title": "카메라 프레임을 모델의 축 순서로 정리",
+          "explanation": "x[b,t,h,w,c] → x′[b,c,t,h,w]",
+          "input_shape": "[B,T,352,640,3]",
+          "output_shape": "[B,3,T,352,640]",
+          "equation": "x[b,t,h,w,c] → x′[b,c,t,h,w]",
+          "assumptions": "선택 설정에 대한 정적 shape 추적. 실제 forward tensor dump가 아님.",
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "고정 커밋 코드",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L603-L660"
+            },
+            {
+              "label": "고정 코드·설정",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/scripts/train/droid_training_lora.sh#L61-L98"
+            },
+            {
+              "label": "고정 코드·설정",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/transform/dreamzero_cotrain.py#L309-L356"
+            }
+          ],
+          "operation": "x[b,t,h,w,c] → x′[b,c,t,h,w]"
+        },
+        {
+          "title": "축 이름은 저장 순서와 다르다",
+          "explanation": "permute는 원소 값을 계산하지 않고 좌표 해석을 바꾼다. 예를 들어 원본 (b,t,h,w,c)에 있던 값은 결과 (b,c,t,h,w)에서 읽는다. 보통 stride가 바뀌는 view이므로 메모리가 재정렬되었다고 가정하면 안 된다.",
+          "input_shape": "[B,T,H,W,C]",
+          "output_shape": "[B,C,T,H,W]",
+          "equation": "y[b,c,t,h,w] = x[b,t,h,w,c]",
+          "assumptions": "일반적인 strided tensor 의미. 실제 copy 여부는 연산·contiguity에 따라 다름.",
+          "basis": "mathematical",
+          "evidence": [],
+          "operation": "y[b,c,t,h,w] = x[b,t,h,w,c]"
+        },
+        {
+          "title": "reshape가 축 교환을 대신할 수 없는 이유",
+          "explanation": "연속 메모리의 일렬 순서를 그대로 묶어 shape만 바꾸는 것과, 축을 교환하는 것은 다르다. BCTHW를 바로 [B*T,C,H,W]로 reshape하면 C/T 의미가 보존되지 않을 수 있다. 코드의 정규화 경로는 먼저 BTCHW로 permute한다. 선택적 resize 경로는 별도 runtime 확인이 필요하다.",
+          "input_shape": "[B,C,T,H,W]",
+          "output_shape": "[B,T,C,H,W] → [B*T,C,H,W]",
+          "equation": "linear index(BTCHW) = ((((b·T+t)·C+c)·H+h)·W+w)",
+          "assumptions": "원소 수만 같아도 의미가 같은 tensor는 아니다.",
+          "basis": "mathematical",
+          "evidence": [],
+          "operation": "linear index(BTCHW) = ((((b·T+t)·C+c)·H+h)·W+w)"
+        },
+        {
+          "title": "정수 픽셀과 부동소수 연산",
+          "explanation": "0–255 픽셀을 float로 바꾸고 /255 한다. 이는 축 변환과 별개인 값 변환이다. 이후 normalize_video 경로가 적용되므로 /255 결과를 최종 모델 입력 범위로 단정하지 않는다.",
+          "input_shape": "uint8 [B,C,T,H,W]",
+          "output_shape": "floating tensor, 동일 shape",
+          "equation": "u = float(pixel)/255",
+          "assumptions": "",
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "해당 코드",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L622-L660"
+            }
+          ],
+          "operation": "u = float(pixel)/255"
         }
       ]
     },
@@ -64,21 +175,21 @@
       "title": "픽셀 영상을 잠재 영상으로 압축",
       "explanation": "VAE가 시공간 정보를 잠재 표현으로 변환한다. 잠재 프레임 F를 원본 프레임 T와 같다고 가정하면 안 된다. 기본 14B 구성의 Cz=16이며, Wan2.2 5B의 Cz=48과 구분한다. 선택 VAE와 실제 입력에 따라 F,h,w가 결정된다.",
       "operation": "encode",
-      "input_shape": "[B,C,T,H,W]",
-      "output_shape": "[B,Cz,F,h,w]",
+      "input_shape": "[B,3,T,352,640]",
+      "output_shape": "[B,16,F,44,80]; T=4k+1 → F=k+1",
       "equation": "z = VAE.encode(x)",
       "mode": "shared",
       "evidence": [
         {
           "label": "고정 커밋 코드",
           "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L660-L680"
+        },
+        {
+          "label": "Wan2.1 VAE: z_dim16 / spatial factor8",
+          "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_vae.py#L1042-L1059"
         }
       ],
       "verification": "source",
-      "concepts": [
-        "Video Diffusion Models",
-        "Wan Video Models"
-      ],
       "mechanics": [
         {
           "title": "VAE의 gradient 경계",
@@ -86,8 +197,8 @@
           "input_shape": "영상 tensor",
           "output_shape": "latent tensor (VAE encoding 경로 gradient 미기록)",
           "equation": "with torch.no_grad(): latents = vae.encode(...)",
-          "basis": "code",
           "assumptions": "",
+          "basis": "code",
           "evidence": [
             {
               "label": "해당 코드",
@@ -101,8 +212,8 @@
           "input_shape": "길이 L의 한 축",
           "output_shape": "convolution 한 층의 Lout",
           "equation": "Lout = floor((L+2p−d(k−1)−1)/s + 1)",
-          "basis": "mathematical",
           "assumptions": "k=kernel, p=padding, d=dilation, s=stride. 이 식은 일반 convolution 한 층의 유도이며 VAE 전체 실행 기록이 아님.",
+          "basis": "mathematical",
           "evidence": []
         },
         {
@@ -111,14 +222,208 @@
           "input_shape": "image + zero frames → [B,Cz,F,h,w]",
           "output_shape": "y [B,4+Cz,F,h,w]",
           "equation": "Cin = Cz + (4+Cz); Cz=16 ⇒ Cin=36",
-          "basis": "code",
           "assumptions": "기본 I2V 조건 결합 경로. 5B variant에 이 숫자를 그대로 사용하지 않음.",
+          "basis": "code",
           "evidence": [
             {
               "label": "해당 코드",
               "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L563-L584"
             }
           ]
+        },
+        {
+          "title": "공간 축과 시간 축 압축을 따로 세기",
+          "explanation": "Wan2.1 조건에서 공간 8배 압축:352/8=44,640/8=80. causal temporal 규약 T=4k+1일 때 F=k+1. T=33이면 F=9지만 실제 batch의 T는 측정하지 않았다.",
+          "input_shape": "[B,3,T,352,640]",
+          "output_shape": "[B,16,F,44,80]",
+          "equation": "F=1+(T−1)/4; h=352/8=44; w=640/8=80",
+          "assumptions": "선택한 Wan2.1 DROID 설정의 정적 추적. 실제 forward 실행·checkpoint 구성 검증 없음.",
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "고정 코드·설정",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L563-L580"
+            }
+          ]
+        }
+      ],
+      "concepts": [
+        "Video Diffusion Models",
+        "Wan Video Models"
+      ],
+      "shape_trace": [
+        {
+          "title": "픽셀 영상을 잠재 영상으로 압축",
+          "explanation": "z = VAE.encode(x)",
+          "input_shape": "[B,3,T,352,640]",
+          "output_shape": "[B,16,F,44,80]; T=4k+1 → F=k+1",
+          "equation": "z = VAE.encode(x)",
+          "assumptions": "선택 설정에 대한 정적 shape 추적. 실제 forward tensor dump가 아님.",
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "고정 커밋 코드",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L660-L680"
+            },
+            {
+              "label": "Wan2.1 VAE: z_dim16 / spatial factor8",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_vae.py#L1042-L1059"
+            }
+          ],
+          "operation": "z = VAE.encode(x)"
+        },
+        {
+          "title": "VAE의 gradient 경계",
+          "explanation": "encode_video는 VAE를 bf16/eval 상태로 준비한 뒤 torch.no_grad 안에서 encode한다. 이 경로를 통과해 VAE encoder까지 학습 gradient가 전파된다고 해석하면 안 된다. 뒤의 DiT loss가 존재한다는 사실과는 별개다.",
+          "input_shape": "영상 tensor",
+          "output_shape": "latent tensor (VAE encoding 경로 gradient 미기록)",
+          "equation": "with torch.no_grad(): latents = vae.encode(...)",
+          "assumptions": "",
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "해당 코드",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L552-L562"
+            }
+          ],
+          "operation": "with torch.no_grad(): latents = vae.encode(...)"
+        },
+        {
+          "title": "압축 shape는 실제 encoder 설정에서 결정",
+          "explanation": "F,h,w는 영상 데이터와 선택 VAE가 정한다. 일반 convolution 출력 길이 공식은 아래와 같지만, 이를 VAE 전체에 한 번 적용해서 정확한 압축률을 얻을 수는 없다. 레이어별 stride/padding 및 temporal causal 처리가 필요하다.",
+          "input_shape": "길이 L의 한 축",
+          "output_shape": "convolution 한 층의 Lout",
+          "equation": "Lout = floor((L+2p−d(k−1)−1)/s + 1)",
+          "assumptions": "k=kernel, p=padding, d=dilation, s=stride. 이 식은 일반 convolution 한 층의 유도이며 VAE 전체 실행 기록이 아님.",
+          "basis": "mathematical",
+          "evidence": [],
+          "operation": "Lout = floor((L+2p−d(k−1)−1)/s + 1)"
+        },
+        {
+          "title": "첫 프레임 조건의 채널 수가 늘어나는 이유",
+          "explanation": "첫 영상 뒤에 zero frames를 붙여 VAE encode하고, 첫 잠재 프레임만 1인 4채널 mask를 concat한다. 기본 Cz=16이면 조건 y의 채널은 4+16=20, noisy latent 16과 결합하면 36이다.",
+          "input_shape": "image + zero frames → [B,Cz,F,h,w]",
+          "output_shape": "y [B,4+Cz,F,h,w]",
+          "equation": "Cin = Cz + (4+Cz); Cz=16 ⇒ Cin=36",
+          "assumptions": "기본 I2V 조건 결합 경로. 5B variant에 이 숫자를 그대로 사용하지 않음.",
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "해당 코드",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L563-L584"
+            }
+          ],
+          "operation": "Cin = Cz + (4+Cz); Cz=16 ⇒ Cin=36"
+        },
+        {
+          "title": "공간 축과 시간 축 압축을 따로 세기",
+          "explanation": "Wan2.1 조건에서 공간 8배 압축:352/8=44,640/8=80. causal temporal 규약 T=4k+1일 때 F=k+1. T=33이면 F=9지만 실제 batch의 T는 측정하지 않았다.",
+          "input_shape": "[B,3,T,352,640]",
+          "output_shape": "[B,16,F,44,80]",
+          "equation": "F=1+(T−1)/4; h=352/8=44; w=640/8=80",
+          "assumptions": "선택한 Wan2.1 DROID 설정의 정적 추적. 실제 forward 실행·checkpoint 구성 검증 없음.",
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "고정 코드·설정",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L563-L580"
+            }
+          ],
+          "operation": "F=1+(T−1)/4; h=352/8=44; w=640/8=80"
+        }
+      ]
+    },
+    {
+      "id": "conditioning",
+      "title": "첫 프레임 latent와 4채널 mask를 noisy latent에 결합",
+      "explanation": "첫 이미지 뒤에 zero RGB frames를 붙여 VAE encode한16채널과4채널 mask를 결합한다. noisy16+y20을 채널축에 합쳐 patch Conv3d의 in_dim36을 맞춘다. 이것은 토큰축 concat과 다른 연산이다.",
+      "operation": "concat",
+      "input_shape": "noisy latent [B,16,F,44,80]; 첫 RGB frame",
+      "output_shape": "y [B,20,F,44,80]; model input [B,36,F,44,80]",
+      "equation": "16 noisy + (4 mask + 16 conditioning)=36",
+      "mode": "shared",
+      "evidence": [
+        {
+          "label": "고정 코드·설정",
+          "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L563-L580"
+        },
+        {
+          "label": "고정 코드·설정",
+          "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L2035-L2042"
+        }
+      ],
+      "verification": "source",
+      "mechanics": [
+        {
+          "title": "값 concat과 축 concat",
+          "explanation": "채널 dim=1 결합은 F/h/w를 보존한다. mask 값·첫-frame 위치는 encode_image에서 만든다. 36을 RGB 입력채널이나 head수로 읽으면 안 된다.",
+          "input_shape": "[B,16,F,44,80] + [B,20,F,44,80]",
+          "output_shape": "[B,36,F,44,80]",
+          "equation": "cat([x,y],dim=1)",
+          "assumptions": "선택한 Wan2.1 DROID 설정의 정적 추적. 실제 forward 실행·checkpoint 구성 검증 없음.",
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "고정 코드·설정",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L2035-L2042"
+            }
+          ]
+        }
+      ],
+      "concepts": [
+        "World Action Models"
+      ],
+      "shape_trace": [
+        {
+          "title": "첫 프레임 latent와 4채널 mask를 noisy latent에 결합",
+          "explanation": "16 noisy + (4 mask + 16 conditioning)=36",
+          "input_shape": "noisy latent [B,16,F,44,80]; 첫 RGB frame",
+          "output_shape": "y [B,20,F,44,80]; model input [B,36,F,44,80]",
+          "equation": "16 noisy + (4 mask + 16 conditioning)=36",
+          "assumptions": "선택 설정에 대한 정적 shape 추적. 실제 forward tensor dump가 아님.",
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "고정 코드·설정",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L563-L580"
+            },
+            {
+              "label": "고정 코드·설정",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L2035-L2042"
+            }
+          ],
+          "operation": "16 noisy + (4 mask + 16 conditioning)=36"
+        },
+        {
+          "title": "첫 latent 시간의 네 mask 채널을1로 지정",
+          "input_shape": "zeros mask [B,4,F,44,80]",
+          "output_shape": "mask[:,:,0:1,:,:]=1; 나머지 시간0",
+          "operation": "msk=zeros(...); msk[:,:,0:1,:,:]=1; cat([msk,y],dim=1)",
+          "explanation": "msk=zeros(...); msk[:,:,0:1,:,:]=1; cat([msk,y],dim=1)",
+          "basis": "code",
+          "assumptions": "선택 설정에 대한 정적 코드 추적. 실제 tensor 실행 측정 아님.",
+          "evidence": [
+            {
+              "label": "고정 코드의 실제 연산",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L571-L580"
+            }
+          ]
+        },
+        {
+          "title": "값 concat과 축 concat",
+          "explanation": "채널 dim=1 결합은 F/h/w를 보존한다. mask 값·첫-frame 위치는 encode_image에서 만든다. 36을 RGB 입력채널이나 head수로 읽으면 안 된다.",
+          "input_shape": "[B,16,F,44,80] + [B,20,F,44,80]",
+          "output_shape": "[B,36,F,44,80]",
+          "equation": "cat([x,y],dim=1)",
+          "assumptions": "선택한 Wan2.1 DROID 설정의 정적 추적. 실제 forward 실행·checkpoint 구성 검증 없음.",
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "고정 코드·설정",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L2035-L2042"
+            }
+          ],
+          "operation": "cat([x,y],dim=1)"
         }
       ]
     },
@@ -127,8 +432,8 @@
       "title": "잠재 영상을 토큰 행렬로 펼치기",
       "explanation": "I2V 조건 y와 채널 방향으로 결합한 뒤 (1,2,2) 크기 3D convolution으로 patch를 만든다. 공간 2×2 영역이 한 토큰이 되며 시간 축은 이 patch 단계에서 줄이지 않는다. flatten과 transpose 뒤 각 행이 토큰, 열이 특징이다.",
       "operation": "patchify",
-      "input_shape": "[B,Cin,F,h,w]",
-      "output_shape": "[B,Nv,D]",
+      "input_shape": "[B,36,F,44,80]",
+      "output_shape": "[B,880F,5120]",
       "equation": "Nv = F·⌊h/2⌋·⌊w/2⌋",
       "mode": "shared",
       "evidence": [
@@ -138,9 +443,6 @@
         }
       ],
       "verification": "source",
-      "concepts": [
-        "Video Diffusion Models"
-      ],
       "mechanics": [
         {
           "title": "패치 토큰은 픽셀을 단순 나열한 벡터가 아니다",
@@ -148,8 +450,8 @@
           "input_shape": "[B,Cin,F,h,w], W [D,Cin,1,2,2]",
           "output_shape": "[B,D,F,h′,w′]",
           "equation": "z[b,o,f,i,j] = bias[o] + Σc Σu=0..1 Σv=0..1 W[o,c,0,u,v]·x[b,c,f,2i+u,2j+v]",
-          "basis": "mathematical",
           "assumptions": "kernel=stride=(1,2,2), padding=0인 patch embedding을 설명하는 index 전개.",
+          "basis": "mathematical",
           "evidence": []
         },
         {
@@ -158,19 +460,93 @@
           "input_shape": "[B,D,F,h′,w′]",
           "output_shape": "[B,Nv,D]",
           "equation": "n=(f·h′+i)·w′+j; token[b,n,o]=z[b,o,f,i,j]",
-          "basis": "mathematical",
           "assumptions": "h′=floor(h/2), w′=floor(w/2). 잘린 홀수 경계는 원본 크기와 대조.",
+          "basis": "mathematical",
           "evidence": []
+        },
+        {
+          "title": "Conv3d는 픽셀 목록을 펼치기만 하는 연산이 아니다",
+          "explanation": "36채널의1×2×2 이웃 144개 값을 각 output feature로 가중 합산한다. kernel=stride=(1,2,2); 시간 F 유지, 공간44×80→22×40. flatten 후 transpose로 토큰축을 만든다.",
+          "input_shape": "[B,36,F,44,80]",
+          "output_shape": "[B,5120,F,22,40] → [B,880F,5120]",
+          "equation": "z[b,d,f,i,j]=bias[d]+Σ(c,u,v)W[d,c,0,u,v]x[b,c,f,2i+u,2j+v]",
+          "assumptions": "선택한 Wan2.1 DROID 설정의 정적 추적. 실제 forward 실행·checkpoint 구성 검증 없음.",
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "고정 코드·설정",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L2035-L2051"
+            }
+          ]
+        }
+      ],
+      "concepts": [
+        "Video Diffusion Models"
+      ],
+      "shape_trace": [
+        {
+          "title": "잠재 영상을 토큰 행렬로 펼치기",
+          "explanation": "Nv = F·⌊h/2⌋·⌊w/2⌋",
+          "input_shape": "[B,36,F,44,80]",
+          "output_shape": "[B,880F,5120]",
+          "equation": "Nv = F·⌊h/2⌋·⌊w/2⌋",
+          "assumptions": "선택 설정에 대한 정적 shape 추적. 실제 forward tensor dump가 아님.",
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "고정 커밋 코드",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L2030-L2075"
+            }
+          ],
+          "operation": "Nv = F·⌊h/2⌋·⌊w/2⌋"
+        },
+        {
+          "title": "패치 토큰은 픽셀을 단순 나열한 벡터가 아니다",
+          "explanation": "실제 Conv3d는 패치 위치의 Cin×1×2×2 값에 학습된 가중치를 곱해 D개 출력을 만든다. 화면의 색 패치 펼치기는 원소가 묶이는 순서를 보여주는 예시일 뿐 학습 투영을 생략한다.",
+          "input_shape": "[B,Cin,F,h,w], W [D,Cin,1,2,2]",
+          "output_shape": "[B,D,F,h′,w′]",
+          "equation": "z[b,o,f,i,j] = bias[o] + Σc Σu=0..1 Σv=0..1 W[o,c,0,u,v]·x[b,c,f,2i+u,2j+v]",
+          "assumptions": "kernel=stride=(1,2,2), padding=0인 patch embedding을 설명하는 index 전개.",
+          "basis": "mathematical",
+          "evidence": [],
+          "operation": "z[b,o,f,i,j] = bias[o] + Σc Σu=0..1 Σv=0..1 W[o,c,0,u,v]·x[b,c,f,2i+u,2j+v]"
+        },
+        {
+          "title": "flatten과 transpose 뒤 토큰 번호",
+          "explanation": "Conv 출력의 F,h′,w′를 하나의 길이 Nv로 합친 뒤 D와 교환한다. 어느 토큰이 어느 시공간 patch인지 n의 인덱스식으로 복원할 수 있다.",
+          "input_shape": "[B,D,F,h′,w′]",
+          "output_shape": "[B,Nv,D]",
+          "equation": "n=(f·h′+i)·w′+j; token[b,n,o]=z[b,o,f,i,j]",
+          "assumptions": "h′=floor(h/2), w′=floor(w/2). 잘린 홀수 경계는 원본 크기와 대조.",
+          "basis": "mathematical",
+          "evidence": [],
+          "operation": "n=(f·h′+i)·w′+j; token[b,n,o]=z[b,o,f,i,j]"
+        },
+        {
+          "title": "Conv3d는 픽셀 목록을 펼치기만 하는 연산이 아니다",
+          "explanation": "36채널의1×2×2 이웃 144개 값을 각 output feature로 가중 합산한다. kernel=stride=(1,2,2); 시간 F 유지, 공간44×80→22×40. flatten 후 transpose로 토큰축을 만든다.",
+          "input_shape": "[B,36,F,44,80]",
+          "output_shape": "[B,5120,F,22,40] → [B,880F,5120]",
+          "equation": "z[b,d,f,i,j]=bias[d]+Σ(c,u,v)W[d,c,0,u,v]x[b,c,f,2i+u,2j+v]",
+          "assumptions": "선택한 Wan2.1 DROID 설정의 정적 추적. 실제 forward 실행·checkpoint 구성 검증 없음.",
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "고정 코드·설정",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L2035-L2051"
+            }
+          ],
+          "operation": "z[b,d,f,i,j]=bias[d]+Σ(c,u,v)W[d,c,0,u,v]x[b,c,f,2i+u,2j+v]"
         }
       ]
     },
     {
       "id": "action",
       "title": "행동·상태를 영상과 같은 특징 폭으로 투영",
-      "explanation": "행동은 action encoder, 상태는 state MLP를 통해 폭 D에 맞춘다. A는 행동 horizon, S는 상태 수, da/ds는 패딩을 포함한 차원이다. 단위와 패딩 제거는 로봇별 데이터 transform에서 확인해야 한다.",
+      "explanation": "행동 encoder는 단일 Linear가 아니다. CategorySpecificLinear의 배치별 W1(32→5120), 시간 sin/cos encoding5120, 특징축 concat10240, W2(10240→5120)+swish, W3(5120→5120) 순서다. 상태는 별도 두 층 MLP+ReLU이며 max_state_dim 기본64, hidden_size 기본1024를 사용한다. action-head YAML hidden_size64와 이 DiT constructor hidden_size1024를 혼동하지 않는다. 실제 로봇 자유도·패딩 전 값은 metadata 검증 필요.",
       "operation": "project",
-      "input_shape": "action [B,A,da]; state [B,S,ds]",
-      "output_shape": "[B,A,D]; [B,S,D]",
+      "input_shape": "action [B,A,32]; state [B,S,Ds]",
+      "output_shape": "[B,A,5120]; [B,S,5120]",
       "equation": "action_encoder(a,t), state_encoder(s)",
       "mode": "shared",
       "evidence": [
@@ -180,19 +556,21 @@
         }
       ],
       "verification": "source",
-      "concepts": [
-        "World Action Models"
-      ],
       "mechanics": [
         {
-          "title": "Linear는 마지막 축을 축약한다",
-          "explanation": "각 시간 위치마다 같은 가중치 행렬을 적용한다. batch나 시간 축을 합쳐 평균내는 연산이 아니다. MLP는 이런 projection과 비선형 함수를 합성한다.",
-          "input_shape": "X [B,A,da], W [D,da], b [D]",
-          "output_shape": "Y [B,A,D]",
-          "equation": "Y[b,t,o] = Σi X[b,t,i]W[o,i]+b[o]",
-          "basis": "mathematical",
+          "title": "CategorySpecificLinear의 weight 배치와 합산 축",
+          "explanation": "실제 구현은 nn.Linear의 [out,in] 저장 표기가 아니라 CategorySpecificLinear의 [category,in,out] 저장과 torch.bmm을 사용한다. batch별 category 선택 후 마지막 입력축32를 축약한다.",
+          "input_shape": "X [B,A,32], W[category] [B,32,5120]",
+          "output_shape": "[B,A,5120]",
+          "equation": "Y[b,a,o]=Σi X[b,a,i]W[category_b,i,o]+bias[category_b,o]",
           "assumptions": "일반 Linear 전개. 실제 action encoder의 timestep 결합·MLP 층은 해당 클래스에서 따로 확인.",
-          "evidence": []
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "CategorySpecificLinear.forward",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L31-L42"
+            }
+          ]
         },
         {
           "title": "패딩 차원과 물리적 자유도",
@@ -200,9 +578,85 @@
           "input_shape": "로봇별 행동/상태",
           "output_shape": "모델 공통 padded tensor",
           "equation": "actual DoF ≤ padded dimension (설정 확인 필요)",
-          "basis": "unknown",
           "assumptions": "각 실제 로봇의 좌표 단위·padding 제거·실행 명령은 이 해설의 검증 범위 밖.",
+          "basis": "unknown",
           "evidence": []
+        }
+      ],
+      "concepts": [
+        "World Action Models"
+      ],
+      "shape_trace": [
+        {
+          "title": "행동 W1: 배치별 weight contraction",
+          "input_shape": "a [B,A,32], W1[cat] [B,32,5120]",
+          "output_shape": "[B,A,5120]",
+          "operation": "a_emb[b,a,d]=Σi action[b,a,i]W1[cat_b,i,d]+bias[cat_b,d]",
+          "explanation": "a_emb[b,a,d]=Σi action[b,a,i]W1[cat_b,i,d]+bias[cat_b,d]",
+          "basis": "code",
+          "assumptions": "선택 설정에 대한 정적 코드 추적. 실제 tensor 실행 측정 아님.",
+          "evidence": [
+            {
+              "label": "고정 코드의 실제 연산",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L31-L42"
+            }
+          ]
+        },
+        {
+          "title": "시간 embedding과 feature concat",
+          "input_shape": "a_emb [B,A,5120], timestep [B,A]",
+          "output_shape": "[B,A,10240]",
+          "operation": "tau_emb=sin/cos(timestep); cat([a_emb,tau_emb],dim=-1)",
+          "explanation": "tau_emb=sin/cos(timestep); cat([a_emb,tau_emb],dim=-1)",
+          "basis": "code",
+          "assumptions": "선택 설정에 대한 정적 코드 추적. 실제 tensor 실행 측정 아님.",
+          "evidence": [
+            {
+              "label": "고정 코드의 실제 연산",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L57-L85"
+            }
+          ]
+        },
+        {
+          "title": "시간 결합 projection과 swish",
+          "input_shape": "[B,A,10240]",
+          "output_shape": "[B,A,5120]",
+          "operation": "W3(swish(W2(concat))); swish(u)=u·sigmoid(u)",
+          "explanation": "W3(swish(W2(concat))); swish(u)=u·sigmoid(u)",
+          "basis": "code",
+          "assumptions": "선택 설정에 대한 정적 코드 추적. 실제 tensor 실행 측정 아님.",
+          "evidence": [
+            {
+              "label": "고정 코드의 실제 연산",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L83-L91"
+            }
+          ]
+        },
+        {
+          "title": "상태 MLP",
+          "input_shape": "state [B,S,Ds]; model expects default Ds=64",
+          "output_shape": "[B,S,1024] → [B,S,5120]",
+          "operation": "layer2(ReLU(layer1(state)))",
+          "explanation": "layer2(ReLU(layer1(state)))",
+          "basis": "code",
+          "assumptions": "Ds의 데이터-transform resolved 폭은 확인하지 못함; CausalWanModel hidden_size default1024, state input default64. 원본 constructor L1286-L1291 및 state encoder L1367-L1372 참조.",
+          "evidence": [
+            {
+              "label": "고정 코드의 실제 연산",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L45-L54"
+            }
+          ]
+        },
+        {
+          "title": "패딩 차원과 물리적 자유도",
+          "explanation": "da/ds는 모델 입력을 맞추기 위한 최대 차원일 수 있다. 로봇의 실제 DoF와 같다고 가정하면 안 된다. 패딩된 축에 대한 loss 및 반환값 처리까지 mask와 transform을 추적해야 한다.",
+          "input_shape": "로봇별 행동/상태",
+          "output_shape": "모델 공통 padded tensor",
+          "equation": "actual DoF ≤ padded dimension (설정 확인 필요)",
+          "assumptions": "각 실제 로봇의 좌표 단위·padding 제거·실행 명령은 이 해설의 검증 범위 밖.",
+          "basis": "unknown",
+          "evidence": [],
+          "operation": "actual DoF ≤ padded dimension (설정 확인 필요)"
         }
       ]
     },
@@ -211,8 +665,8 @@
       "title": "영상 다음에 행동과 상태를 붙이기",
       "explanation": "토큰 배열은 영상 전체, 행동 전체, 상태 전체 순서다. 배열의 순서와 어떤 토큰을 볼 수 있는지 정하는 causal mask는 별개다. 언어/이미지 context는 별도 조건 경로로 전달된다.",
       "operation": "concat",
-      "input_shape": "[B,Nv,D] + [B,A,D] + [B,S,D]",
-      "output_shape": "[B,Nv+A+S,D]",
+      "input_shape": "video [B,880F,5120], action [B,A,5120], state [B,S,5120]",
+      "output_shape": "[B,880F+A+S,5120]",
       "equation": "tokens = concat(video, action, state; axis=1)",
       "mode": "shared",
       "evidence": [
@@ -222,9 +676,6 @@
         }
       ],
       "verification": "source",
-      "concepts": [
-        "World Action Models"
-      ],
       "mechanics": [
         {
           "title": "concat의 축과 길이 보존",
@@ -232,8 +683,8 @@
           "input_shape": "[B,Nv,D], [B,A,D], [B,S,D]",
           "output_shape": "[B,Nv+A+S,D]",
           "equation": "N = Nv + A + S",
-          "basis": "mathematical",
           "assumptions": "",
+          "basis": "mathematical",
           "evidence": []
         },
         {
@@ -242,9 +693,83 @@
           "input_shape": "query [B,H,N,dh], context K/V [B,H,L,dh]",
           "output_shape": "attention logits [B,H,N,L]",
           "equation": "score[b,h,i,j] = Σr Q[b,h,i,r]K[b,h,j,r]",
-          "basis": "mathematical",
           "assumptions": "일반 cross-attention index 식. 각 block의 정확한 context 구성은 구현 근거 확인.",
+          "basis": "mathematical",
           "evidence": []
+        },
+        {
+          "title": "한 block과 전체 sample 길이를 구분",
+          "explanation": "학습 assertion은 A/(F−1)=12, (F−1)/S=2. 따라서 T=33→F=9일 때 A=96,S=4가 필요하다. CLI action_horizon=24는 chunk 길이이며 이 조건부 전체 sequence 길이96과 혼동하면 안 된다.",
+          "input_shape": "Nv=880F; A=12(F−1); S=(F−1)/2",
+          "output_shape": "T=33 조건: [B,8020,5120]",
+          "equation": "L=880×9+96+4=8020",
+          "assumptions": "선택한 Wan2.1 DROID 설정의 정적 추적. 실제 forward 실행·checkpoint 구성 검증 없음.",
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "고정 코드·설정",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L697-L704"
+            }
+          ]
+        }
+      ],
+      "concepts": [
+        "World Action Models"
+      ],
+      "shape_trace": [
+        {
+          "title": "영상 다음에 행동과 상태를 붙이기",
+          "explanation": "tokens = concat(video, action, state; axis=1)",
+          "input_shape": "video [B,880F,5120], action [B,A,5120], state [B,S,5120]",
+          "output_shape": "[B,880F+A+S,5120]",
+          "equation": "tokens = concat(video, action, state; axis=1)",
+          "assumptions": "선택 설정에 대한 정적 shape 추적. 실제 forward tensor dump가 아님.",
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "고정 커밋 코드",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L2030-L2160"
+            }
+          ],
+          "operation": "tokens = concat(video, action, state; axis=1)"
+        },
+        {
+          "title": "concat의 축과 길이 보존",
+          "explanation": "토큰 축(dim=1)에 이어 붙이므로 특징 폭 D는 바뀌지 않는다. 마지막 특징 축으로 concat하면 D가 더해져 전혀 다른 연산이 된다.",
+          "input_shape": "[B,Nv,D], [B,A,D], [B,S,D]",
+          "output_shape": "[B,Nv+A+S,D]",
+          "equation": "N = Nv + A + S",
+          "assumptions": "",
+          "basis": "mathematical",
+          "evidence": [],
+          "operation": "N = Nv + A + S"
+        },
+        {
+          "title": "언어 조건의 broadcast를 추측하지 않기",
+          "explanation": "언어 context의 토큰 수 L과 주 sequence 길이 N은 다르다. cross attention에서는 query N개가 context L개를 읽는다. 동일 길이가 필요 없으며 [B,N,L] 축의 관계를 만든다.",
+          "input_shape": "query [B,H,N,dh], context K/V [B,H,L,dh]",
+          "output_shape": "attention logits [B,H,N,L]",
+          "equation": "score[b,h,i,j] = Σr Q[b,h,i,r]K[b,h,j,r]",
+          "assumptions": "일반 cross-attention index 식. 각 block의 정확한 context 구성은 구현 근거 확인.",
+          "basis": "mathematical",
+          "evidence": [],
+          "operation": "score[b,h,i,j] = Σr Q[b,h,i,r]K[b,h,j,r]"
+        },
+        {
+          "title": "한 block과 전체 sample 길이를 구분",
+          "explanation": "학습 assertion은 A/(F−1)=12, (F−1)/S=2. 따라서 T=33→F=9일 때 A=96,S=4가 필요하다. CLI action_horizon=24는 chunk 길이이며 이 조건부 전체 sequence 길이96과 혼동하면 안 된다.",
+          "input_shape": "Nv=880F; A=12(F−1); S=(F−1)/2",
+          "output_shape": "T=33 조건: [B,8020,5120]",
+          "equation": "L=880×9+96+4=8020",
+          "assumptions": "선택한 Wan2.1 DROID 설정의 정적 추적. 실제 forward 실행·checkpoint 구성 검증 없음.",
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "고정 코드·설정",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L697-L704"
+            }
+          ],
+          "operation": "L=880×9+96+4=8020"
         }
       ]
     },
@@ -253,8 +778,8 @@
       "title": "각 토큰이 필요한 문맥을 읽기",
       "explanation": "14B YAML의 D=5120, head 수=40이므로 head당 폭은 128이다. Q/K에 위치 정보를 반영하고 mask로 허용된 문맥만 읽는다. 아래 softmax 조절기는 원리를 보여주는 교육용 숫자이며 DreamZero의 실제 attention 측정값이 아니다.",
       "operation": "attention",
-      "input_shape": "[B,N,5120] → Q,K,V [B,N,40,128]",
-      "output_shape": "[B,N,5120]",
+      "input_shape": "[B,L,5120]",
+      "output_shape": "Q,K,V [B,L,40,128] → [B,L,5120]",
       "equation": "Attention(Q,K,V) = softmax(QKᵀ/√128 + M)V",
       "mode": "shared",
       "evidence": [
@@ -268,9 +793,6 @@
         }
       ],
       "verification": "source",
-      "concepts": [
-        "World Action Models"
-      ],
       "mechanics": [
         {
           "title": "Q/K/V: 같은 입력에서 다른 역할의 좌표 만들기",
@@ -278,8 +800,8 @@
           "input_shape": "X [B,N,D]",
           "output_shape": "Q,K,V [B,N,H,dh]",
           "equation": "q = norm_q(q_proj(x)).view(B,N,H,dh)",
-          "basis": "code",
           "assumptions": "",
+          "basis": "code",
           "evidence": [
             {
               "label": "해당 코드",
@@ -293,8 +815,8 @@
           "input_shape": "[B,N,5120]",
           "output_shape": "[B,N,40,128]",
           "equation": "q[b,n,h,r] ↔ q_flat[b,n,h·128+r]",
-          "basis": "mathematical",
           "assumptions": "기본 14B YAML. class 기본값과 다른 variant 설정을 섞지 않음.",
+          "basis": "mathematical",
           "evidence": []
         },
         {
@@ -303,8 +825,8 @@
           "input_shape": "Q [B,H,Nq,dh], K [B,H,Nk,dh]",
           "output_shape": "scores [B,H,Nq,Nk]",
           "equation": "S[b,h,i,j] = Σr=1..dh Q[b,h,i,r] K[b,h,j,r]",
-          "basis": "mathematical",
           "assumptions": "",
+          "basis": "mathematical",
           "evidence": []
         },
         {
@@ -313,8 +835,8 @@
           "input_shape": "S [B,H,Nq,Nk]",
           "output_shape": "scaled S, 동일 shape",
           "equation": "Var(Σr qr kr)=dh; Var(S/√dh)=1",
-          "basis": "mathematical",
           "assumptions": "독립·영평균·단위분산 가정에 따른 설명용 유도; 실제 activation 통계는 측정하지 않음.",
+          "basis": "mathematical",
           "evidence": []
         },
         {
@@ -323,8 +845,8 @@
           "input_shape": "scores [B,H,Nq,Nk], broadcastable mask M",
           "output_shape": "masked scores, 동일 shape",
           "equation": "S′=S/√dh+M; Mij∈{0,−∞}",
-          "basis": "mathematical",
           "assumptions": "일반 수학적 표현. 실제 구현은 block별 K/V 문맥을 선택해 같은 접근 제한을 구현할 수 있음.",
+          "basis": "mathematical",
           "evidence": []
         },
         {
@@ -333,8 +855,8 @@
           "input_shape": "logits [B,H,Nq,Nk]",
           "output_shape": "P [B,H,Nq,Nk]",
           "equation": "Pij=exp(S′ij−maxk S′ik)/Σj exp(S′ij−maxk S′ik); Σj Pij=1",
-          "basis": "mathematical",
           "assumptions": "모든 key가 masked인 행은 별도 처리 필요. 일반 유한 logit 행에 대한 식.",
+          "basis": "mathematical",
           "evidence": []
         },
         {
@@ -343,9 +865,202 @@
           "input_shape": "P [B,H,Nq,Nk], V [B,H,Nk,dh]",
           "output_shape": "O [B,H,Nq,dh] → [B,Nq,D]",
           "equation": "O[b,h,i,r] = Σj P[b,h,i,j]V[b,h,j,r]",
-          "basis": "mathematical",
           "assumptions": "Attention의 논리적 식. fused kernel은 scores 전체를 메모리에 만들지 않을 수 있음.",
+          "basis": "mathematical",
           "evidence": []
+        },
+        {
+          "title": "5120 특징을 40개 head로 나누기",
+          "explanation": "Q/K는 Linear 후 RMS normalization 경로, V는 Linear를 거쳐 각각 view(B,L,40,128). head별 점곱의 합산 축은128이며 출력 token축 L과 다르다. 실제 kernel은 full L² attention matrix를 저장한다고 단정하지 않는다.",
+          "input_shape": "[B,L,5120]",
+          "output_shape": "[B,L,40,128]",
+          "equation": "head_dim=5120/40=128; score[b,h,i,j]=Σd Q[b,i,h,d]K[b,j,h,d]/√128",
+          "assumptions": "선택한 Wan2.1 DROID 설정의 정적 추적. 실제 forward 실행·checkpoint 구성 검증 없음.",
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "고정 코드·설정",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L803-L816"
+            }
+          ]
+        }
+      ],
+      "concepts": [
+        "World Action Models"
+      ],
+      "shape_trace": [
+        {
+          "title": "각 토큰이 필요한 문맥을 읽기",
+          "explanation": "Attention(Q,K,V) = softmax(QKᵀ/√128 + M)V",
+          "input_shape": "[B,L,5120]",
+          "output_shape": "Q,K,V [B,L,40,128] → [B,L,5120]",
+          "equation": "Attention(Q,K,V) = softmax(QKᵀ/√128 + M)V",
+          "assumptions": "선택 설정에 대한 정적 shape 추적. 실제 forward tensor dump가 아님.",
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "고정 커밋 코드",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/configs/model/dreamzero/action_head/wan_flow_matching_action_tf.yaml"
+            },
+            {
+              "label": "attention 구현",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L786-L1140"
+            }
+          ],
+          "operation": "Attention(Q,K,V) = softmax(QKᵀ/√128 + M)V"
+        },
+        {
+          "title": "Q/K/V: 같은 입력에서 다른 역할의 좌표 만들기",
+          "explanation": "Q는 무엇을 찾는지, K는 비교할 주소, V는 가져올 내용에 해당한다. 실제 코드에서는 Q/K projection 뒤 norm_q/norm_k를 적용하고 head로 나눈다. V는 별도 projection 후 reshape한다.",
+          "input_shape": "X [B,N,D]",
+          "output_shape": "Q,K,V [B,N,H,dh]",
+          "equation": "q = norm_q(q_proj(x)).view(B,N,H,dh)",
+          "assumptions": "",
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "해당 코드",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L800-L813"
+            }
+          ],
+          "operation": "q = norm_q(q_proj(x)).view(B,N,H,dh)"
+        },
+        {
+          "title": "head 분할은 원소 수를 보존한다",
+          "explanation": "D=H·dh일 때 마지막 D축을 H와 dh로 나누고 attention이 요구하는 축 순서로 해석한다. 5120=40×128이므로 기본 14B head 폭이 128이다.",
+          "input_shape": "[B,N,5120]",
+          "output_shape": "[B,N,40,128]",
+          "equation": "q[b,n,h,r] ↔ q_flat[b,n,h·128+r]",
+          "assumptions": "기본 14B YAML. class 기본값과 다른 variant 설정을 섞지 않음.",
+          "basis": "mathematical",
+          "evidence": [],
+          "operation": "q[b,n,h,r] ↔ q_flat[b,n,h·128+r]"
+        },
+        {
+          "title": "행렬곱에서 합산되는 축은 dh",
+          "explanation": "Q의 i번째 토큰과 K의 j번째 토큰을 마지막 특징축 r에서 내적한다. 출력에는 i와 j가 모두 남는다. batch/head 축은 독립적으로 같은 계산을 한다.",
+          "input_shape": "Q [B,H,Nq,dh], K [B,H,Nk,dh]",
+          "output_shape": "scores [B,H,Nq,Nk]",
+          "equation": "S[b,h,i,j] = Σr=1..dh Q[b,h,i,r] K[b,h,j,r]",
+          "assumptions": "",
+          "basis": "mathematical",
+          "evidence": [],
+          "operation": "S[b,h,i,j] = Σr=1..dh Q[b,h,i,r] K[b,h,j,r]"
+        },
+        {
+          "title": "왜 √dh로 나누는가",
+          "explanation": "성분별 평균0·분산1이고 서로 독립이라는 단순화 아래 dh개 곱의 합은 분산이 dh다. √dh로 나누면 분산이 약1이 되어 softmax가 차원 증가만으로 지나치게 한 원소에 몰리는 것을 완화한다. 실제 normalized Q/K의 분포가 이 가정과 정확히 같다는 주장은 아니다.",
+          "input_shape": "S [B,H,Nq,Nk]",
+          "output_shape": "scaled S, 동일 shape",
+          "equation": "Var(Σr qr kr)=dh; Var(S/√dh)=1",
+          "assumptions": "독립·영평균·단위분산 가정에 따른 설명용 유도; 실제 activation 통계는 측정하지 않음.",
+          "basis": "mathematical",
+          "evidence": [],
+          "operation": "Var(Σr qr kr)=dh; Var(S/√dh)=1"
+        },
+        {
+          "title": "mask는 값0을 주는 것이 아니라 볼 수 없게 한다",
+          "explanation": "허용하지 않는 logit에 −∞를 더하면 exp(−∞)=0이 된다. 0을 더하는 것은 차단이 아니다. causal/block 조건이 단순한 전역 아래삼각 mask와 같다고 가정하면 안 된다.",
+          "input_shape": "scores [B,H,Nq,Nk], broadcastable mask M",
+          "output_shape": "masked scores, 동일 shape",
+          "equation": "S′=S/√dh+M; Mij∈{0,−∞}",
+          "assumptions": "일반 수학적 표현. 실제 구현은 block별 K/V 문맥을 선택해 같은 접근 제한을 구현할 수 있음.",
+          "basis": "mathematical",
+          "evidence": [],
+          "operation": "S′=S/√dh+M; Mij∈{0,−∞}"
+        },
+        {
+          "title": "softmax는 key 축마다 합이 1",
+          "explanation": "각 query 행 i를 고정하고 모든 key j에 대해 정규화한다. 전체 tensor를 한 번에 정규화하는 것이 아니다. max를 빼면 exp overflow를 줄이면서 비율은 보존된다.",
+          "input_shape": "logits [B,H,Nq,Nk]",
+          "output_shape": "P [B,H,Nq,Nk]",
+          "equation": "Pij=exp(S′ij−maxk S′ik)/Σj exp(S′ij−maxk S′ik); Σj Pij=1",
+          "assumptions": "모든 key가 masked인 행은 별도 처리 필요. 일반 유한 logit 행에 대한 식.",
+          "basis": "mathematical",
+          "evidence": [],
+          "operation": "Pij=exp(S′ij−maxk S′ik)/Σj exp(S′ij−maxk S′ik); Σj Pij=1"
+        },
+        {
+          "title": "V 가중합과 head 병합",
+          "explanation": "query i마다 모든 key의 V를 확률 Pij로 가중합한다. key 축 j는 사라지고 V 특징축 r이 남는다. head 출력을 이어 붙여 D로 돌아가며 output projection을 거친다.",
+          "input_shape": "P [B,H,Nq,Nk], V [B,H,Nk,dh]",
+          "output_shape": "O [B,H,Nq,dh] → [B,Nq,D]",
+          "equation": "O[b,h,i,r] = Σj P[b,h,i,j]V[b,h,j,r]",
+          "assumptions": "Attention의 논리적 식. fused kernel은 scores 전체를 메모리에 만들지 않을 수 있음.",
+          "basis": "mathematical",
+          "evidence": [],
+          "operation": "O[b,h,i,r] = Σj P[b,h,i,j]V[b,h,j,r]"
+        },
+        {
+          "title": "5120 특징을 40개 head로 나누기",
+          "explanation": "Q/K는 Linear 후 RMS normalization 경로, V는 Linear를 거쳐 각각 view(B,L,40,128). head별 점곱의 합산 축은128이며 출력 token축 L과 다르다. 실제 kernel은 full L² attention matrix를 저장한다고 단정하지 않는다.",
+          "input_shape": "[B,L,5120]",
+          "output_shape": "[B,L,40,128]",
+          "equation": "head_dim=5120/40=128; score[b,h,i,j]=Σd Q[b,i,h,d]K[b,j,h,d]/√128",
+          "assumptions": "선택한 Wan2.1 DROID 설정의 정적 추적. 실제 forward 실행·checkpoint 구성 검증 없음.",
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "고정 코드·설정",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L803-L816"
+            }
+          ],
+          "operation": "head_dim=5120/40=128; score[b,h,i,j]=Σd Q[b,i,h,d]K[b,j,h,d]/√128"
+        }
+      ]
+    },
+    {
+      "id": "unpatch",
+      "title": "영상 head의 64개 값을 원래 latent 격자로 되돌리기",
+      "explanation": "CausalHead의 output 폭은 patch volume4×out_dim16=64다. view→einsum 축 재배치→reshape로 22×40 patch grid를44×80 latent grid로 복원한다. action은 별도 decoder가 [B,A,32]로 만든다.",
+      "operation": "unpatchify",
+      "input_shape": "video [B,880F,5120]",
+      "output_shape": "head [B,880F,64] → [B,16,F,44,80]",
+      "equation": "4×16=64; Nv=F×22×40",
+      "mode": "shared",
+      "evidence": [
+        {
+          "label": "고정 코드·설정",
+          "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L2174-L2196"
+        },
+        {
+          "label": "고정 코드·설정",
+          "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L1215-L1226"
+        },
+        {
+          "label": "고정 코드·설정",
+          "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L2144-L2162"
+        }
+      ],
+      "verification": "source",
+      "mechanics": [],
+      "concepts": [
+        "World Action Models"
+      ],
+      "shape_trace": [
+        {
+          "title": "영상 head의 64개 값을 원래 latent 격자로 되돌리기",
+          "explanation": "4×16=64; Nv=F×22×40",
+          "input_shape": "video [B,880F,5120]",
+          "output_shape": "head [B,880F,64] → [B,16,F,44,80]",
+          "equation": "4×16=64; Nv=F×22×40",
+          "assumptions": "선택 설정에 대한 정적 shape 추적. 실제 forward tensor dump가 아님.",
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "고정 코드·설정",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L2174-L2196"
+            },
+            {
+              "label": "고정 코드·설정",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L1215-L1226"
+            },
+            {
+              "label": "고정 코드·설정",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L2144-L2162"
+            }
+          ],
+          "operation": "4×16=64; Nv=F×22×40"
         }
       ]
     },
@@ -354,20 +1069,17 @@
       "title": "학습용 noisy sample과 정답 속도 만들기",
       "explanation": "깨끗한 영상/행동과 Gaussian noise를 σ 비율로 섞는다. σ를 미분하면 ε−x가 되므로 모델이 맞힐 target은 noise ε 자체가 아니다. 영상·행동의 timestep 결합/분리는 설정에 달려 있다.",
       "operation": "interpolate",
-      "input_shape": "clean x, noise ε (동일 shape)",
-      "output_shape": "xσ, target v* (입력과 동일 shape)",
+      "input_shape": "clean/noise video [B,F,16,44,80]; action [B,A,32]",
+      "output_shape": "noisy video [B,F,16,44,80]; target model layout [B,16,F,44,80]",
       "equation": "xσ=(1−σ)x+σε; ∂xσ/∂σ=ε−x",
       "mode": "training",
       "evidence": [
         {
           "label": "고정 커밋 코드",
-          "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/flow_match_scheduler.py#L73-L95"
+          "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/flow_match_scheduler.py#L73-L85"
         }
       ],
       "verification": "source",
-      "concepts": [
-        "Flow Matching"
-      ],
       "mechanics": [
         {
           "title": "σ의 방향을 먼저 고정",
@@ -375,8 +1087,8 @@
           "input_shape": "clean x, noise ε",
           "output_shape": "xσ",
           "equation": "xσ=(1−σ)x+σε ⇒ dxσ/dσ=ε−x",
-          "basis": "mathematical",
           "assumptions": "",
+          "basis": "mathematical",
           "evidence": []
         },
         {
@@ -385,14 +1097,62 @@
           "input_shape": "σ [B*F], x [B*F,Cz,h,w]",
           "output_shape": "σ [B*F,1,1,1] → xσ [B*F,Cz,h,w]",
           "equation": "xσ[k,c,i,j]=(1−σ[k])x[k,c,i,j]+σ[k]ε[k,c,i,j]",
-          "basis": "code",
           "assumptions": "",
+          "basis": "code",
           "evidence": [
             {
               "label": "해당 코드",
-              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/flow_match_scheduler.py#L73-L95"
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/flow_match_scheduler.py#L73-L85"
             }
           ]
+        }
+      ],
+      "concepts": [
+        "Flow Matching"
+      ],
+      "shape_trace": [
+        {
+          "title": "학습용 noisy sample과 정답 속도 만들기",
+          "explanation": "xσ=(1−σ)x+σε; ∂xσ/∂σ=ε−x",
+          "input_shape": "clean/noise video [B,F,16,44,80]; action [B,A,32]",
+          "output_shape": "noisy video [B,F,16,44,80]; target model layout [B,16,F,44,80]",
+          "equation": "xσ=(1−σ)x+σε; ∂xσ/∂σ=ε−x",
+          "assumptions": "선택 설정에 대한 정적 shape 추적. 실제 forward tensor dump가 아님.",
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "고정 커밋 코드",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/flow_match_scheduler.py#L73-L85"
+            }
+          ],
+          "operation": "xσ=(1−σ)x+σε; ∂xσ/∂σ=ε−x"
+        },
+        {
+          "title": "σ의 방향을 먼저 고정",
+          "explanation": "이 구현의 σ=0은 data, σ=1은 noise다. 다른 논문에서 time 방향이 반대면 target의 부호도 바뀔 수 있다. 이름 flow matching이 같다는 이유로 식을 복사하면 안 된다.",
+          "input_shape": "clean x, noise ε",
+          "output_shape": "xσ",
+          "equation": "xσ=(1−σ)x+σε ⇒ dxσ/dσ=ε−x",
+          "assumptions": "",
+          "basis": "mathematical",
+          "evidence": [],
+          "operation": "xσ=(1−σ)x+σε ⇒ dxσ/dσ=ε−x"
+        },
+        {
+          "title": "σ broadcast는 sample 축을 보존",
+          "explanation": "scheduler는 σ가 원본 sample과 같은 rank가 될 때까지 끝에 singleton 축을 붙인다. [B*F] σ는 영상 [B*F,Cz,h,w]에 대해 [B*F,1,1,1]로 broadcast된다. 한 sample의 모든 공간·채널에 같은 σ가 적용된다.",
+          "input_shape": "σ [B*F], x [B*F,Cz,h,w]",
+          "output_shape": "σ [B*F,1,1,1] → xσ [B*F,Cz,h,w]",
+          "equation": "xσ[k,c,i,j]=(1−σ[k])x[k,c,i,j]+σ[k]ε[k,c,i,j]",
+          "assumptions": "",
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "해당 코드",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/flow_match_scheduler.py#L73-L85"
+            }
+          ],
+          "operation": "xσ[k,c,i,j]=(1−σ[k])x[k,c,i,j]+σ[k]ε[k,c,i,j]"
         }
       ]
     },
@@ -401,8 +1161,8 @@
       "title": "학습에서는 정답 영상 문맥을 함께 제공",
       "explanation": "clean_x의 영상 토큰을 noisy sequence 앞에 붙인다. 정답 문맥을 주는 teacher forcing이다. 미래 정답을 얻을 수 없는 추론에서는 이 전체 prefix를 그대로 사용할 수 없다.",
       "operation": "concat",
-      "input_shape": "clean video [B,Nv,D]; noisy [B,Nv+A+S,D]",
-      "output_shape": "[B,2Nv+A+S,D]",
+      "input_shape": "clean [B,880F,5120]; joint [B,880F+A+S,5120]",
+      "output_shape": "[B,1760F+A+S,5120]",
       "equation": "training tokens = [clean_video; noisy_video; action; state]",
       "mode": "training",
       "evidence": [
@@ -412,9 +1172,6 @@
         }
       ],
       "verification": "source",
-      "concepts": [
-        "World Action Models"
-      ],
       "mechanics": [
         {
           "title": "정답 prefix와 정보 누출은 mask로 구분",
@@ -422,8 +1179,8 @@
           "input_shape": "clean/noisy video, action/state Q/K/V",
           "output_shape": "해당 block의 제한된 K/V context",
           "equation": "Kcontext = [past_clean; own_noisy_image; own_action; own_state]",
-          "basis": "code",
           "assumptions": "",
+          "basis": "code",
           "evidence": [
             {
               "label": "해당 코드",
@@ -437,9 +1194,88 @@
           "input_shape": "loss와 연산 그래프",
           "output_shape": "parameter별 gradient 또는 없음",
           "equation": "∂L/∂θ = Σ paths (chain rule)",
-          "basis": "mathematical",
           "assumptions": "학습 전반의 일반 원리. VAE no_grad는 별도 코드 단계에서 확인.",
+          "basis": "mathematical",
           "evidence": []
+        },
+        {
+          "title": "clean prefix를 추가하고 결과에서 제거",
+          "explanation": "학습에는 clean video tokens7920개를 앞에 붙여 L=15940(조건부 T33). block mask가 접근 가능한 문맥을 제한한다. transformer 후 clean prefix를 제거해 영상·행동 output을 분리한다. 추론은 미래 clean prefix가 없다.",
+          "input_shape": "조건부 [B,8020,5120] + clean [B,7920,5120]",
+          "output_shape": "[B,15940,5120] → remove prefix → [B,8020,5120]",
+          "equation": "Ltrain=2Nv+A+S",
+          "assumptions": "선택한 Wan2.1 DROID 설정의 정적 추적. 실제 forward 실행·checkpoint 구성 검증 없음.",
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "고정 코드·설정",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L2100-L2151"
+            }
+          ]
+        }
+      ],
+      "concepts": [
+        "World Action Models"
+      ],
+      "shape_trace": [
+        {
+          "title": "학습에서는 정답 영상 문맥을 함께 제공",
+          "explanation": "training tokens = [clean_video; noisy_video; action; state]",
+          "input_shape": "clean [B,880F,5120]; joint [B,880F+A+S,5120]",
+          "output_shape": "[B,1760F+A+S,5120]",
+          "equation": "training tokens = [clean_video; noisy_video; action; state]",
+          "assumptions": "선택 설정에 대한 정적 shape 추적. 실제 forward tensor dump가 아님.",
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "고정 커밋 코드",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L2030-L2160"
+            }
+          ],
+          "operation": "training tokens = [clean_video; noisy_video; action; state]"
+        },
+        {
+          "title": "정답 prefix와 정보 누출은 mask로 구분",
+          "explanation": "clean 문맥을 붙였다는 것만으로 모든 정답을 모든 query가 볼 수 있는 것은 아니다. 해당 action block은 첫 clean frame과 앞선 clean blocks, 자기 noisy image/action/state 블록의 K/V를 읽도록 문맥이 구성된다.",
+          "input_shape": "clean/noisy video, action/state Q/K/V",
+          "output_shape": "해당 block의 제한된 K/V context",
+          "equation": "Kcontext = [past_clean; own_noisy_image; own_action; own_state]",
+          "assumptions": "",
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "해당 코드",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L735-L784"
+            }
+          ],
+          "operation": "Kcontext = [past_clean; own_noisy_image; own_action; own_state]"
+        },
+        {
+          "title": "학습에서의 gradient와 추론 문맥",
+          "explanation": "teacher forcing은 입력 문맥을 제공하는 방식이다. optimizer update와 같은 뜻이 아니다. loss의 gradient가 어떤 parameter까지 가는지는 requires_grad/no_grad/detach를 따라 확인해야 한다.",
+          "input_shape": "loss와 연산 그래프",
+          "output_shape": "parameter별 gradient 또는 없음",
+          "equation": "∂L/∂θ = Σ paths (chain rule)",
+          "assumptions": "학습 전반의 일반 원리. VAE no_grad는 별도 코드 단계에서 확인.",
+          "basis": "mathematical",
+          "evidence": [],
+          "operation": "∂L/∂θ = Σ paths (chain rule)"
+        },
+        {
+          "title": "clean prefix를 추가하고 결과에서 제거",
+          "explanation": "학습에는 clean video tokens7920개를 앞에 붙여 L=15940(조건부 T33). block mask가 접근 가능한 문맥을 제한한다. transformer 후 clean prefix를 제거해 영상·행동 output을 분리한다. 추론은 미래 clean prefix가 없다.",
+          "input_shape": "조건부 [B,8020,5120] + clean [B,7920,5120]",
+          "output_shape": "[B,15940,5120] → remove prefix → [B,8020,5120]",
+          "equation": "Ltrain=2Nv+A+S",
+          "assumptions": "선택한 Wan2.1 DROID 설정의 정적 추적. 실제 forward 실행·checkpoint 구성 검증 없음.",
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "고정 코드·설정",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L2100-L2151"
+            }
+          ],
+          "operation": "Ltrain=2Nv+A+S"
         }
       ]
     },
@@ -459,9 +1295,6 @@
         }
       ],
       "verification": "source",
-      "concepts": [
-        "Flow Matching"
-      ],
       "mechanics": [
         {
           "title": "어느 축을 평균내는가",
@@ -469,8 +1302,8 @@
           "input_shape": "error [B,Cz,F,h,w]",
           "output_shape": "per-frame [B,F] → scalar",
           "equation": "Lv=mean_b,f w(tbf)·mean_c,i,j (v̂−v*)²",
-          "basis": "code",
           "assumptions": "",
+          "basis": "code",
           "evidence": [
             {
               "label": "해당 코드",
@@ -484,9 +1317,76 @@
           "input_shape": "example errors [2,4], mask [1,0]",
           "output_shape": "mean masked =1; valid mean =2",
           "equation": "Σi mi ei / D ≠ Σi mi ei / Σi mi",
-          "basis": "illustrative",
           "assumptions": "교육용 두 원소 예제. 실제 배치의 loss 측정이 아님.",
+          "basis": "illustrative",
           "evidence": []
+        }
+      ],
+      "concepts": [
+        "Flow Matching"
+      ],
+      "shape_trace": [
+        {
+          "title": "예측 속도와 정답 속도를 비교",
+          "explanation": "L = Lvideo + Laction; target = ε−x",
+          "input_shape": "video prediction [B,Cz,F,h,w]; action [B,A,da]",
+          "output_shape": "scalar loss",
+          "equation": "L = Lvideo + Laction; target = ε−x",
+          "assumptions": "선택 설정에 대한 정적 shape 추적. 실제 forward tensor dump가 아님.",
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "고정 커밋 코드",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L750-L815"
+            }
+          ],
+          "operation": "L = Lvideo + Laction; target = ε−x"
+        },
+        {
+          "title": "어느 축을 평균내는가",
+          "explanation": "영상 prediction과 target의 원소별 squared error는 [B,Cz,F,h,w]다. 코드의 dim=(1,3,4), 즉 채널·공간 축을 평균하면 [B,F]가 남아 timestep별 weight를 적용할 수 있다. 마지막 전체 평균은 scalar다.",
+          "input_shape": "error [B,Cz,F,h,w]",
+          "output_shape": "per-frame [B,F] → scalar",
+          "equation": "Lv=mean_b,f w(tbf)·mean_c,i,j (v̂−v*)²",
+          "assumptions": "",
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "해당 코드",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L750-L815"
+            }
+          ],
+          "operation": "Lv=mean_b,f w(tbf)·mean_c,i,j (v̂−v*)²"
+        },
+        {
+          "title": "영상 MSE: channel·height·width 평균",
+          "input_shape": "error [B,16,F,44,80]",
+          "output_shape": "[B,F] → scalar",
+          "operation": "mse(...,reduction=none).mean(dim=(1,3,4)); multiply timestep weight[B,F]; mean()",
+          "explanation": "mse(...,reduction=none).mean(dim=(1,3,4)); multiply timestep weight[B,F]; mean()",
+          "basis": "code",
+          "assumptions": "선택 설정에 대한 정적 코드 추적. 실제 tensor 실행 측정 아님.",
+          "evidence": [
+            {
+              "label": "고정 코드의 실제 연산",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L784-L789"
+            }
+          ]
+        },
+        {
+          "title": "행동 MSE: padding mask 적용 후 padded width32 평균",
+          "input_shape": "squared error [B,A,32], action_mask 동일 shape",
+          "output_shape": "[B,A] → scalar",
+          "operation": "(error*action_mask*has_real_action[:,None]).mean(dim=2); timestep weight[B,A]; mean()",
+          "explanation": "(error*action_mask*has_real_action[:,None]).mean(dim=2); timestep weight[B,A]; mean()",
+          "basis": "code",
+          "assumptions": "has_real_action broadcasting은 실제 collated rank 확인 필요. 선택 script B=1; 임의 B에서 작동한다고 실행 검증하지 않음. 유효 mask 합으로 나누는 것이 아니다.",
+          "evidence": [
+            {
+              "label": "고정 코드의 실제 연산",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L791-L803"
+            }
+          ]
         }
       ]
     },
@@ -506,10 +1406,6 @@
         }
       ],
       "verification": "source",
-      "concepts": [
-        "KV Cache Observation Replacement",
-        "Closed-loop Control"
-      ],
       "mechanics": [
         {
           "title": "KV를 저장하면 무엇을 재계산하지 않는가",
@@ -517,8 +1413,8 @@
           "input_shape": "cached K,V plus current block",
           "output_shape": "extended/replaced video context",
           "equation": "attention(Qnew, [Kpast;Knew], [Vpast;Vnew])",
-          "basis": "mathematical",
           "assumptions": "캐시의 일반 논리. 실제 코드의 관측 replacement 및 action cache 제외 규칙은 아래 근거 확인.",
+          "basis": "mathematical",
           "evidence": []
         },
         {
@@ -527,14 +1423,63 @@
           "input_shape": "current video/action K,V",
           "output_shape": "video KV cache + ephemeral action context",
           "equation": "cache content ≠ all current tokens",
-          "basis": "code",
           "assumptions": "",
+          "basis": "code",
           "evidence": [
             {
               "label": "해당 코드",
               "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L1041-L1140"
             }
           ]
+        }
+      ],
+      "concepts": [
+        "KV Cache Observation Replacement",
+        "Closed-loop Control"
+      ],
+      "shape_trace": [
+        {
+          "title": "추론에서는 새 관측으로 캐시를 갱신",
+          "explanation": "context ← actual observation",
+          "input_shape": "observed latent [B,Cz,Fobs,h,w]; previous KV",
+          "output_shape": "updated video KV; 현재 block 조건",
+          "equation": "context ← actual observation",
+          "assumptions": "선택 설정에 대한 정적 shape 추적. 실제 forward tensor dump가 아님.",
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "고정 커밋 코드",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L973-L1210"
+            }
+          ],
+          "operation": "context ← actual observation"
+        },
+        {
+          "title": "KV를 저장하면 무엇을 재계산하지 않는가",
+          "explanation": "새 query가 과거를 읽기 위해 과거 토큰의 K/V를 다시 계산하는 일을 줄인다. 모든 attention 비용이 사라지는 것은 아니다. 새 Q와 허용된 cached K의 비교는 여전히 필요하다.",
+          "input_shape": "cached K,V plus current block",
+          "output_shape": "extended/replaced video context",
+          "equation": "attention(Qnew, [Kpast;Knew], [Vpast;Vnew])",
+          "assumptions": "캐시의 일반 논리. 실제 코드의 관측 replacement 및 action cache 제외 규칙은 아래 근거 확인.",
+          "basis": "mathematical",
+          "evidence": [],
+          "operation": "attention(Qnew, [Kpast;Knew], [Vpast;Vnew])"
+        },
+        {
+          "title": "행동 토큰을 영구 과거 영상으로 남기지 않기",
+          "explanation": "추론 attention 경로는 action queries/keys/values를 영상 cache와 구분한다. 반복 denoising 중 현재 행동 추정치와 실제 과거 관측을 같은 영구 cache로 취급하면 의미가 달라진다.",
+          "input_shape": "current video/action K,V",
+          "output_shape": "video KV cache + ephemeral action context",
+          "equation": "cache content ≠ all current tokens",
+          "assumptions": "",
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "해당 코드",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L1041-L1140"
+            }
+          ],
+          "operation": "cache content ≠ all current tokens"
         }
       ]
     },
@@ -543,8 +1488,8 @@
       "title": "영상과 행동을 별도 스케줄러로 갱신",
       "explanation": "영상 noise와 행동 noise에서 시작해 DiT가 예측한 속도로 반복 갱신한다. 두 scheduler는 별도다. 이 함수에서 CFG는 영상 prediction에 적용하며 행동 업데이트는 conditional action prediction을 사용한다.",
       "operation": "denoise",
-      "input_shape": "video [B,Cz,nf,h,w]; action [B,A,da]",
-      "output_shape": "denoised video/action (각 입력과 동일 shape)",
+      "input_shape": "video [B,16,Fchunk,44,80]; action [B,Achunk,32]",
+      "output_shape": "동일 shape; scheduler별 σ 다음 상태",
       "equation": "vvideo = vu + scale·(vc−vu)",
       "mode": "inference",
       "evidence": [
@@ -554,10 +1499,6 @@
         }
       ],
       "verification": "source",
-      "concepts": [
-        "Flow Matching",
-        "Asynchronous Inference"
-      ],
       "mechanics": [
         {
           "title": "scheduler step은 training step이 아니다",
@@ -565,8 +1506,8 @@
           "input_shape": "sample xσ, predicted velocity",
           "output_shape": "next sample",
           "equation": "Euler example: xσ+Δσ ≈ xσ + Δσ·vθ(xσ,σ)",
-          "basis": "illustrative",
           "assumptions": "실제 UniPC update 식의 대체 구현으로 제시하지 않음.",
+          "basis": "illustrative",
           "evidence": []
         },
         {
@@ -575,14 +1516,98 @@
           "input_shape": "video cond/uncond, action cond predictions",
           "output_shape": "각 scheduler가 갱신한 video/action",
           "equation": "video: vu+s(vc−vu); action: vc_action",
-          "basis": "code",
           "assumptions": "",
+          "basis": "code",
           "evidence": [
             {
               "label": "해당 코드",
               "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L1274-L1305"
             }
           ]
+        },
+        {
+          "title": "실제 scheduler 방향을 그대로 읽기",
+          "explanation": "공식 scheduler는 sigma 다음값과 현재값 차이를 model_output에 곱한다. 통상 denoising의 sigma 감소에서는 이 차이가 음수다. target=noise−clean을 clean−noise로 바꾸지 않는다. 영상과 행동 scheduler/timestep 배열은 각각 확인해야 한다.",
+          "input_shape": "sample xσ; predicted vσ 동일 shape",
+          "output_shape": "xσnext 동일 shape",
+          "equation": "xnext=xσ+(σnext−σ)vσ; vσ*=ε−xclean",
+          "assumptions": "선택한 Wan2.1 DROID 설정의 정적 추적. 실제 forward 실행·checkpoint 구성 검증 없음.",
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "고정 코드·설정",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/flow_match_scheduler.py#L43-L53"
+            }
+          ]
+        }
+      ],
+      "concepts": [
+        "Flow Matching",
+        "Asynchronous Inference"
+      ],
+      "shape_trace": [
+        {
+          "title": "영상과 행동을 별도 스케줄러로 갱신",
+          "explanation": "vvideo = vu + scale·(vc−vu)",
+          "input_shape": "video [B,16,Fchunk,44,80]; action [B,Achunk,32]",
+          "output_shape": "동일 shape; scheduler별 σ 다음 상태",
+          "equation": "vvideo = vu + scale·(vc−vu)",
+          "assumptions": "선택 설정에 대한 정적 shape 추적. 실제 forward tensor dump가 아님.",
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "고정 커밋 코드",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L1212-L1305"
+            }
+          ],
+          "operation": "vvideo = vu + scale·(vc−vu)"
+        },
+        {
+          "title": "추론 block noise 초기화",
+          "input_shape": "encoded observation [B,16,Fobs,44,80]",
+          "output_shape": "noise video [B,16,2,44,80]; action [B,24,32] (선택 설정 적용 시)",
+          "operation": "generate_noise((B,C,num_frame_per_block,h,w)); generate_noise((B,action_horizon,model.action_dim))",
+          "explanation": "generate_noise((B,C,num_frame_per_block,h,w)); generate_noise((B,action_horizon,model.action_dim))",
+          "basis": "code",
+          "assumptions": "선택 학습 config를 이 inference 함수에 적용한 조건부 값. 실제 배포 checkpoint config 확인 전 Fchunk=2/Achunk=24를 배포 측정값으로 쓰지 않음.",
+          "evidence": [
+            {
+              "label": "고정 코드의 실제 연산",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L1104-L1111"
+            }
+          ]
+        },
+        {
+          "title": "두 schedule과 guidance 경로를 따로 추적",
+          "explanation": "video는 조건/무조건 속도를 선형 결합한다. action scheduler는 flow_pred_cond_action을 받는다. video의 최종 sigma를 높이는 옵션이 action의 완전 denoise까지 중지시키는 것으로 해석하면 안 된다.",
+          "input_shape": "video cond/uncond, action cond predictions",
+          "output_shape": "각 scheduler가 갱신한 video/action",
+          "equation": "video: vu+s(vc−vu); action: vc_action",
+          "assumptions": "",
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "해당 코드",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L1274-L1305"
+            }
+          ],
+          "operation": "video: vu+s(vc−vu); action: vc_action"
+        },
+        {
+          "title": "실제 scheduler 방향을 그대로 읽기",
+          "explanation": "공식 scheduler는 sigma 다음값과 현재값 차이를 model_output에 곱한다. 통상 denoising의 sigma 감소에서는 이 차이가 음수다. target=noise−clean을 clean−noise로 바꾸지 않는다. 영상과 행동 scheduler/timestep 배열은 각각 확인해야 한다.",
+          "input_shape": "sample xσ; predicted vσ 동일 shape",
+          "output_shape": "xσnext 동일 shape",
+          "equation": "xnext=xσ+(σnext−σ)vσ; vσ*=ε−xclean",
+          "assumptions": "선택한 Wan2.1 DROID 설정의 정적 추적. 실제 forward 실행·checkpoint 구성 검증 없음.",
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "고정 코드·설정",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/flow_match_scheduler.py#L43-L53"
+            }
+          ],
+          "operation": "xnext=xσ+(σnext−σ)vσ; vσ*=ε−xclean"
         }
       ]
     },
@@ -591,8 +1616,8 @@
       "title": "반환값과 로봇 명령의 경계를 구분",
       "explanation": "action_pred는 행동 tensor, video_pred는 VAE latent다. video_pred를 RGB 영상이라고 부르면 틀린다. 역정규화·패딩 제거·제어 주기·실행 chunk 선택은 배포 wrapper에서 확인해야 하며, 여기서는 실제 로봇 명령까지 실행 검증하지 않았다.",
       "operation": "decode",
-      "input_shape": "final latent video/action",
-      "output_shape": "action_pred [B,A,da]; video_pred [B,Cz,Fout,h,w]",
+      "input_shape": "predicted padded action [B,Achunk,32]",
+      "output_shape": "embodiment별 unpad·역변환 후 robot command; 실제 joint 차원은 metadata 확인",
       "equation": "video_pred ≠ RGB; RGB needs VAE.decode",
       "mode": "inference",
       "evidence": [
@@ -602,10 +1627,6 @@
         }
       ],
       "verification": "source",
-      "concepts": [
-        "World Action Models",
-        "Closed-loop Control"
-      ],
       "mechanics": [
         {
           "title": "latent와 픽셀, 정규화 행동과 물리 명령은 다른 값",
@@ -613,44 +1634,219 @@
           "input_shape": "video latent; normalized action",
           "output_shape": "RGB / physical action은 추가 변환 필요",
           "equation": "RGB = VAE.decode(latent); physical action = inverse_transform(action)",
-          "basis": "mathematical",
           "assumptions": "실제 배포 wrapper의 inverse transform 식·모터 명령은 확인 불가.",
-          "evidence": []
-        }
-      ]
-    },
-    {
-      "id": "experiments",
-      "title": "빠른 추론이 항상 같은 성능을 뜻하지 않음",
-      "explanation": "Table 3: 4-step 83±6.1%·350ms, 1-step 52±10.2%·150ms, Flash 1-step 74±10.1%·150ms. metric은 표의 task progress다. Flash는 별도 학습 접근이다. Table 4의 AR과 BD는 모두 50% point estimate이므로 AR 정확도 우위로 해석하지 않는다. 모두 논문 보고값이며 현재 컴퓨터 측정이 아니다.",
-      "operation": "compare",
-      "input_shape": "논문 Table 3/4의 조건별 task progress·latency",
-      "output_shape": "속도/성능 절충; 조건별 비교",
-      "equation": "350/150 ≈ 2.33; 83−74 = 9 percentage points",
-      "mode": "shared",
-      "evidence": [
-        {
-          "label": "논문 실험 근거",
-          "url": "https://arxiv.org/html/2602.15922"
-        }
-      ],
-      "verification": "source",
-      "concepts": [
-        "Asynchronous Inference",
-        "World Action Models"
-      ],
-      "mechanics": [
-        {
-          "title": "percentage point와 상대 변화율",
-          "explanation": "83%에서74%로 바뀌면 절대 차이는9 percentage points, 상대 감소는9/83≈10.84%다. 서로 다른 수치를 동일한 9% 감소라고 쓰면 비교를 왜곡한다.",
-          "input_shape": "83%, 74%",
-          "output_shape": "9 pp; 약10.84% 상대 감소",
-          "equation": "Δpp=83−74; relative=(83−74)/83",
           "basis": "mathematical",
-          "assumptions": "논문 Table3의 값을 이용한 산술. 통계적 유의성의 판정이 아님.",
           "evidence": []
+        }
+      ],
+      "concepts": [
+        "World Action Models",
+        "Closed-loop Control"
+      ],
+      "shape_trace": [
+        {
+          "title": "반환값과 로봇 명령의 경계를 구분",
+          "explanation": "video_pred ≠ RGB; RGB needs VAE.decode",
+          "input_shape": "predicted padded action [B,Achunk,32]",
+          "output_shape": "embodiment별 unpad·역변환 후 robot command; 실제 joint 차원은 metadata 확인",
+          "equation": "video_pred ≠ RGB; RGB needs VAE.decode",
+          "assumptions": "선택 설정에 대한 정적 shape 추적. 실제 forward tensor dump가 아님.",
+          "basis": "code",
+          "evidence": [
+            {
+              "label": "고정 커밋 코드",
+              "url": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L1307-L1338"
+            }
+          ],
+          "operation": "video_pred ≠ RGB; RGB needs VAE.decode"
+        },
+        {
+          "title": "latent와 픽셀, 정규화 행동과 물리 명령은 다른 값",
+          "explanation": "shape가 영상처럼 5차원이어도 Cz개 잠재 채널은 RGB가 아니다. action tensor도 그대로 모터 명령이라고 확정할 수 없다. decode와 inverse transform의 경계를 넘을 때 단위와 축을 다시 확인한다.",
+          "input_shape": "video latent; normalized action",
+          "output_shape": "RGB / physical action은 추가 변환 필요",
+          "equation": "RGB = VAE.decode(latent); physical action = inverse_transform(action)",
+          "assumptions": "실제 배포 wrapper의 inverse transform 식·모터 명령은 확인 불가.",
+          "basis": "mathematical",
+          "evidence": [],
+          "operation": "RGB = VAE.decode(latent); physical action = inverse_transform(action)"
         }
       ]
     }
-  ]
+  ],
+  "execution_profile": {
+    "repository": "https://github.com/dreamzero0/dreamzero",
+    "commit": "ab790c198fbce33503358efbbd4187ce9a89adf3",
+    "config": "scripts/train/droid_training_lora.sh",
+    "mode": "training + inference (static source audit)",
+    "scope": "공식 코드 고정 커밋 ab790c198fbce33503358efbbd4187ce9a89adf3의 Wan2.1 DROID LoRA 설정 정적 추적. scripts/train/droid_training_lora.sh의 CLI와 YAML·transform·모델 코드를 대조했다. 실제 checkpoint 로드, Hydra resolve, dataset batch, GPU forward는 실행하지 않았다. B/T/A/S 등 runtime 값은 기호로 남기며 T=33 예시는 조건부 shape 산술이다. 기존 2×2 교육용 배열은 이 실제 설정 추적의 근거가 아니다. 단계 목차는 공유·학습·추론 모듈 설명 순서이며 단일 실행 call stack이 아니다. 학습 실제 의존 순서는 입력/VAE→noise→conditioning/patch/action→concat/clean prefix→attention→unpatch/action decode→loss; 추론은 관측 cache→반복 model forward/scheduler→output이다.",
+    "dimensions": [
+      {
+        "symbol": "B",
+        "value": "B; configured per-device 1",
+        "source": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/scripts/train/droid_training_lora.sh#L81-L87",
+        "meaning": "한 GPU의 실제 sample batch. 선택 학습 CLI 기본1; 배포 batch 미측정."
+      },
+      {
+        "symbol": "V",
+        "value": "3",
+        "source": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/scripts/train/droid_training_lora.sh#L66-L73",
+        "meaning": "DROID camera views"
+      },
+      {
+        "symbol": "Hview × Wview",
+        "value": "176 × 320",
+        "source": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/scripts/train/droid_training_lora.sh#L92-L94",
+        "meaning": "선택 학습 CLI resize. raw camera 크기가 아님."
+      },
+      {
+        "symbol": "H × W",
+        "value": "352 × 640",
+        "source": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/transform/dreamzero_cotrain.py#L333-L356",
+        "meaning": "3뷰 DROID mosaic. 2Hview × 2Wview 계산."
+      },
+      {
+        "symbol": "T",
+        "value": "T; configured num_frames=33",
+        "source": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/scripts/train/droid_training_lora.sh#L65-L69",
+        "meaning": "dataset sample이 실제 제공한 temporal length는 미측정."
+      },
+      {
+        "symbol": "Cz",
+        "value": "16",
+        "source": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_vae.py#L1042-L1059",
+        "meaning": "Wan2.1 VAE latent 채널; Wan2.2와 혼동하지 않음."
+      },
+      {
+        "symbol": "h × w",
+        "value": "44 × 80",
+        "source": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_vae.py#L1042-L1059",
+        "meaning": "공간 factor8과 mosaic352×640으로 계산."
+      },
+      {
+        "symbol": "F",
+        "value": "1+(T−1)/4 for T=4k+1",
+        "source": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L563-L580",
+        "meaning": "causal VAE temporal 규약. T33 조건이면9."
+      },
+      {
+        "symbol": "Cin",
+        "value": "36 = 16 + 4 + 16",
+        "source": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L563-L580",
+        "meaning": "noisy latent와 conditioning mask/latent 결합. Conv3d input36은 YAML65–75도 확인."
+      },
+      {
+        "symbol": "patch",
+        "value": "1 × 2 × 2",
+        "source": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L1266-L1270",
+        "meaning": "Conv3d kernel/stride constructor default"
+      },
+      {
+        "symbol": "D",
+        "value": "5120",
+        "source": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/configs/model/dreamzero/action_head/wan_flow_matching_action_tf.yaml#L65-L80",
+        "meaning": "DiT feature width"
+      },
+      {
+        "symbol": "heads",
+        "value": "40",
+        "source": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/configs/model/dreamzero/action_head/wan_flow_matching_action_tf.yaml#L72-L84",
+        "meaning": "self-attention heads"
+      },
+      {
+        "symbol": "dh",
+        "value": "128 = 5120/40",
+        "source": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L199-L205",
+        "meaning": "head_dim=dim//num_heads; 선택 설정5120/40"
+      },
+      {
+        "symbol": "FFN",
+        "value": "13824",
+        "source": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/configs/model/dreamzero/action_head/wan_flow_matching_action_tf.yaml#L69-L80",
+        "meaning": "feedforward hidden width"
+      },
+      {
+        "symbol": "layers",
+        "value": "40",
+        "source": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/configs/model/dreamzero/action_head/wan_flow_matching_action_tf.yaml#L75-L84",
+        "meaning": "transformer block count"
+      },
+      {
+        "symbol": "Nv",
+        "value": "880F",
+        "source": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L2035-L2051",
+        "meaning": "patch grid F×22×40 flatten. CLI frame_seqlen880과 일치."
+      },
+      {
+        "symbol": "Da",
+        "value": "32",
+        "source": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L1282-L1292",
+        "meaning": "CausalWanModel action_dim default32; transform max_action_dim32와 일치."
+      },
+      {
+        "symbol": "Ds",
+        "value": "미확정; data64 / transform44 / model default64",
+        "source": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/configs/model/dreamzero/transform/dreamzero_cotrain.yaml#L25-L44",
+        "meaning": "Hydra 구성 우선순위 미실행. resolved config의 state width 일치 확인 필요."
+      },
+      {
+        "symbol": "A",
+        "value": "12(F−1)",
+        "source": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L697-L704",
+        "meaning": "학습 assertion과 선택 block24 actions/2 frames. T33이면96; chunk24와 전체A를 구분."
+      },
+      {
+        "symbol": "S",
+        "value": "(F−1)/2",
+        "source": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py#L697-L704",
+        "meaning": "학습 assertion; T33이면4"
+      },
+      {
+        "symbol": "Ljoint",
+        "value": "880F+A+S; T33 조건8020",
+        "source": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L2056-L2066",
+        "meaning": "video→action→state 토큰축 결합"
+      },
+      {
+        "symbol": "Ltrain",
+        "value": "1760F+A+S; T33 조건15940",
+        "source": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L2100-L2105",
+        "meaning": "teacher-forcing clean video prefix 추가"
+      },
+      {
+        "symbol": "head output",
+        "value": "64 = 16 × 1 × 2 × 2",
+        "source": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/groot/vla/model/dreamzero/modules/wan_video_dit_action_casual_chunk.py#L1215-L1226",
+        "meaning": "한 patch의 latent16×4원소 복원"
+      },
+      {
+        "symbol": "infer observed frames",
+        "value": "first=1; next=4",
+        "source": "https://github.com/dreamzero0/dreamzero/blob/ab790c198fbce33503358efbbd4187ce9a89adf3/socket_test_optimized_AR.py#L127-L148",
+        "meaning": "server wrapper 관측 누적. 모델 생성 temporal 길이와 별개."
+      }
+    ],
+    "unknowns": [
+      "실제 호출 batch; 선택 학습 스크립트 기본 per-device batch=1, CFG/IP 분기는 별도",
+      "실제 collated 영상 길이; num_frames=33은 CLI 설정이며 dataset chunk가 만든 tensor를 측정하지 않음",
+      "Wan2.1 causal VAE: T=4k+1일 때 F=1+(T−1)/4",
+      "전체 action token 수; action_horizon=24를 전체 A로 단정하지 않음. 학습 assertion A/(F−1)=24/2",
+      "state token 수; 학습 assertion (F−1)/S=2/1",
+      "state padding width: data YAML 64, transform YAML 44의 구성 우선순위는 실제 resolved config 미확인. CausalWanModel 기본 입력 폭64와 일치 확인 필요",
+      "README와 script 주석의 scripts/train/droid_training.sh 파일은 조사한 캐시에 없으며 실제 파일명 droid_training_lora.sh를 사용했다.",
+      "DROID transform 주석의 외부카메라 random drop 코드는 주석 처리되어 있어 활성 연산으로 설명하지 않는다.",
+      "model in_dim=36은 RGB36이 아니라 noisy latent16 + first-frame conditioning20이다.",
+      "socket_test_optimized_AR.py는 첫 호출 관측1프레임/후속4프레임, 서버 raw 180×320을 사용한다. 이 raw 크기와 선택한 학습 transform 176×320을 혼동하지 않는다. 배포 checkpoint resolved config와 denoising schedule은 미확인.",
+      "has_real_action의 runtime collated rank와 B>1 broadcasting은 미검증. 소스 식을 그대로 기록하며 batch-general correctness는 주장하지 않는다."
+    ]
+  },
+  "validation": {
+    "status": "needs_review",
+    "issues": [
+      "확인하지 못한 내부 연산: 패딩 차원과 물리적 자유도"
+    ],
+    "execution": "static-only",
+    "checked_files": 123,
+    "meaning": "고정 커밋의 파일·행 존재와 경로 완결성 검사. 수학적 정확성 또는 실제 forward 실행 검증이 아닙니다."
+  }
 }

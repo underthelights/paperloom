@@ -6,6 +6,7 @@ from urllib.request import Request, urlopen, build_opener, HTTPRedirectHandler
 from xml.etree import ElementTree as ET
 from bs4 import BeautifulSoup
 import desktop_ai
+import tensor_evidence
 
 ROOT = Path(__file__).resolve().parent
 DATA = Path(os.environ.get('PAPERLOOM_DATA', ROOT/'data')).resolve()/'research'
@@ -419,6 +420,7 @@ No guesses. No project URL means no official repository claim. This is single pa
             (run/'discovery.json').write_text(json.dumps(discovery,ensure_ascii=False,indent=2))
             code=clone_repo(jid,discovery,run)
             (run/'code-status.json').write_text(json.dumps(code,ensure_ascii=False,indent=2))
+            manifest=tensor_evidence.write_inventory(run,code)
             # Copy the user's actual rules into each immutable research run.
             import shutil
             shutil.copytree(SKILLS,run/'guides',ignore=shutil.ignore_patterns('notion-candidates.json'),dirs_exist_ok=True)
@@ -439,11 +441,22 @@ Do not claim code was cloned unless code-status.json says so. Cite URLs in every
             if any(k not in report for k in needed): raise ValueError('분석 응답에 필수 섹션이 누락되었습니다.')
             if any(not isinstance(report[k],str) or not report[k].strip() for k in needed[:-2]): raise ValueError('브리프 섹션 형식이 잘못되었습니다.')
             if any(not isinstance(report[k],list) or any(not isinstance(x,dict) for x in report[k]) for k in ('sources','checks')): raise ValueError('출처/검수 구조가 잘못되었습니다.')
+            trace,trace_sources=analyze_tensor_trace(jid,run,code,manifest)
+            report['walkthrough']=trace
+            report['sources']+= [s for s in trace_sources if s.get('url') not in {v.get('url') for v in report['sources']}]
             mark(jid,'review','원문 대비 주장·수치·소속·코드 근거 검수')
             (run/'draft.json').write_text(json.dumps(report,ensure_ascii=False,indent=2))
             review=review_draft(jid,run)
             for fix in review.get('corrections',[]):
                 if fix.get('section') in needed[:-2] and isinstance(fix.get('replacement'),str): report[fix['section']]=fix['replacement']
+            if isinstance(review.get('walkthrough'),dict):
+                trace=normalize_walkthrough(review['walkthrough'],report['sources'])
+                trace['validation']=tensor_evidence.validate_trace(trace,manifest)
+                report['walkthrough']=trace
+            validation=trace.get('validation',{})
+            if validation.get('status')!='source_checked':
+                review['verdict']='needs_review'
+                review.setdefault('issues',[]).extend(validation.get('issues',[])[:20])
             report.update(id=jid,created=now(),code_status=code,discovery=discovery,review=review,source_manifest=sources,scope='single-paper')
             (run/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2))
             with LOCK:
@@ -498,6 +511,17 @@ def normalize_walkthrough(value, sources):
             fields['output_shape']=fields['output_shape'] or '확인 불가'
             result.append({**fields,'basis':basis,'evidence':evidence})
         return result
+    profile=value.get('execution_profile')
+    if isinstance(profile,dict):
+        result['execution_profile']={k:text(profile.get(k),n) for k,n in (
+            ('repository',1000),('commit',100),('config',1000),('mode',100),('scope',4000))}
+        result['execution_profile']['dimensions']=[{
+            'symbol':text(d.get('symbol'),100),'value':text(d.get('value'),500),
+            'source':url(d.get('source')) if url(d.get('source')) in allowed else '',
+            'meaning':text(d.get('meaning'),2000)} for d in
+            (profile.get('dimensions') if isinstance(profile.get('dimensions'),list) else [])[:100] if isinstance(d,dict)]
+        result['execution_profile']['unknowns']=[text(x,2000) for x in
+            (profile.get('unknowns') if isinstance(profile.get('unknowns'),list) else [])[:40] if text(x,2000)]
     seen=set()
     for step in (value.get('steps') if isinstance(value.get('steps'),list) else [])[:40]:
         if not isinstance(step,dict):continue
@@ -522,7 +546,49 @@ def normalize_walkthrough(value, sources):
             'mode':mode if mode in ('training','inference','shared') else 'shared',
             'evidence':evidence,'verification':verification,'mechanics':normalize_mechanics(step.get('mechanics')),
             'concepts':list(dict.fromkeys(text(c,120) for c in (step.get('concepts') if isinstance(step.get('concepts'),list) else [])[:8] if text(c,120)))})
+        if isinstance(step.get('shape_trace'),list):
+            rows=[]
+            for item in step['shape_trace'][:12]:
+                if not isinstance(item,dict):continue
+                normalized=normalize_mechanics([{**item,'explanation':item.get('explanation') or item.get('operation'),
+                                                'equation':item.get('equation') or item.get('operation')}])
+                for row in normalized:
+                    row['operation']=text(item.get('operation'),2000) or row['equation']
+                    rows.append(row)
+            result['steps'][-1]['shape_trace']=rows
     return result
+
+def analyze_tensor_trace(jid,run,code,manifest):
+    if code.get('status')!='cloned' or not manifest.get('files'):
+        reason='; '.join(manifest.get('limitations',[])) or code.get('reason') or '공식 구현을 확보하지 못했습니다.'
+        result={'title':'코드·설정 기반 텐서 추적','scope':reason,'steps':[]}
+        result['validation']={'status':'needs_review','issues':[result['scope']],'execution':'static-only'}
+        return result,[]
+    mark(jid,'tensor_trace','실제 코드·설정별 입력/출력 축과 학습·추론 경로 추적')
+    guide=run/'guides/paper-walkthrough.md'
+    prompt=RESEARCH_RULES+'''\nPerform a separate source/config tensor audit. Read code-inventory.json, code-status.json and the actual files in code/. Select ONE named configuration and entrypoint; resolve its config chain and CLI overrides by reading, never executing. Do not mix variants. Record every known dimension and its exact source. Unknown runtime dimensions remain symbolic, with reasons. Follow raw inputs through actual preprocessing, encoder, core modules, heads, loss and inference sampler/output. Expand omitted reshape/permute/broadcast/contractions/masks/reductions in step.shape_trace. Distinguish static source facts from mathematical derivations and unknowns. No toy arrays in place of real dimensions. Use full 40-character commit permalinks and actual inclusive line ranges; sources must include every evidence URL. Inventory proves file existence only, not that an operation or numeric configuration is correct. Return ONLY {"walkthrough":{...},"sources":[{"title":"","url":"","kind":"code"}]}.\n'''
+    if guide.is_file():prompt+=guide.read_text()
+    sources=[]
+    result={'title':'코드·설정 기반 텐서 추적','scope':'자동 코드 추적 미완료','steps':[]}
+    try:
+        for attempt in range(2):
+            response=parse_json(cli(jid,prompt,run,'tensor-trace' if attempt==0 else 'tensor-trace-repair',timeout=1200))
+            new_sources=[s for s in response.get('sources',[]) if isinstance(s,dict)] if isinstance(response,dict) and isinstance(response.get('sources'),list) else []
+            candidate=normalize_walkthrough(response.get('walkthrough') if isinstance(response,dict) else None,new_sources)
+            if attempt and result['steps'] and not candidate['steps']:
+                result['validation']['issues'].append('보정 응답에 단계가 없어 이전 부분 결과를 보존했습니다.')
+                break
+            sources=new_sources
+            result=candidate
+            result['validation']=tensor_evidence.validate_trace(result,manifest)
+            (run/('tensor-trace-normalized.json')).write_text(json.dumps(result,ensure_ascii=False,indent=2))
+            if result['validation']['status']=='source_checked':break
+            prompt+='\nRepair the previous tensor-trace-normalized.json by inspecting the actual source. Preserve unknowns. These mechanical checks failed: '+json.dumps(result['validation']['issues'],ensure_ascii=False)
+    except InterruptedError:raise
+    except Exception as exc:
+        result['validation']={'status':'needs_review','issues':['코드 추적 검수를 완료하지 못했습니다: '+str(exc)[:600]],'execution':'static-only'}
+    (run/'tensor-trace-normalized.json').write_text(json.dumps(result,ensure_ascii=False,indent=2))
+    return result,sources
 
 def normalize_model_graph(value, sources):
     from urllib.parse import urlsplit
@@ -553,7 +619,7 @@ def normalize_model_graph(value, sources):
 
 def review_draft(jid,run):
     try:
-        value=parse_json(cli(jid,RESEARCH_RULES+'''\nReview draft.json against paper.txt, paper-pdf.txt, discovery.json and code-status.json; inspect code if present. Check numeric results/table settings, equations and symbol definitions, claims vs evidence, actual code snippets/commit anchors, related-work relation types and model_graph adoption evidence, every tensor_trace reshape/matmul/broadcast/mask and train-versus-inference path, experiment-to-module linkage, walkthrough step shapes and mechanics (axis-wise derivations, broadcasting, masks, gradient flow, explicit assumptions and code vs mathematical vs illustrative basis), source anchors (source means cited, not executed), affiliation vs lab, dates, and unknowns. Do not mark missing facts as verified. Return ONLY {"verdict":"pass|needs_review","issues":["specific issue"],"corrections":[{"section":"tldr|eli5|overview|method|experiments|code|labs|limitations|related_work|tensor_trace","replacement":"complete corrected section Markdown"}]}. Apply all corrections you can support. No fabrication. Missing official code is a limitation, not a reason to invent code. This is single paper, not full survey completion.''',run,'review',timeout=600))
+        value=parse_json(cli(jid,RESEARCH_RULES+'''\nReview draft.json against paper.txt, paper-pdf.txt, discovery.json, code-status.json and code-inventory.json; inspect actual code and selected configuration. Check numeric results/table settings, equations and symbol definitions, claims vs evidence, actual code snippets/commit anchors, related-work relation types and model_graph adoption evidence, every tensor_trace reshape/matmul/broadcast/mask and train-versus-inference path, experiment-to-module linkage, walkthrough execution_profile dimensions/config overrides and step shape_trace/mechanics (axis-wise derivations, broadcasting, masks, gradient flow, explicit assumptions and code vs mathematical vs illustrative basis), source anchors (source means cited, not executed), affiliation vs lab, dates, and unknowns. Mechanical source validation checks file/line existence only; independently verify that the cited operations actually imply the stated dimensions. Do not mark missing facts as verified. Return ONLY {"verdict":"pass|needs_review","issues":["specific issue"],"corrections":[{"section":"tldr|eli5|overview|method|experiments|code|labs|limitations|related_work|tensor_trace","replacement":"complete corrected section Markdown"}],"walkthrough":null}. If a walkthrough correction is needed, replace null with the complete corrected walkthrough using only URLs already in draft.sources. Apply all corrections you can support. No fabrication. Missing official code is a limitation, not a reason to invent code. This is single paper, not full survey completion.''',run,'review',timeout=600))
         if not isinstance(value,dict) or value.get('verdict') not in ('pass','needs_review') or not isinstance(value.get('issues'),list) or not isinstance(value.get('corrections',[]),list):raise ValueError('검수 응답 형식 오류')
         if any(not isinstance(f,dict) for f in value.get('corrections',[])):raise ValueError('검수 수정 형식 오류')
         return value
