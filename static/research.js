@@ -124,7 +124,7 @@ function renderContent(){
 }
 function renderProgress(){
  const latest=state.jobs.find(j=>j.paper_id===activeId&&!['reader','bilingual-reader','knowledge'].includes(j.stage));const j=latest&&['queued','running','error'].includes(latest.status)?latest:null;const el=$('#progress');el.hidden=!j;if(!j)return;
- const names={queued:'대기',sources:'원문',discovery:'코드·연구실',code:'저장소',analysis:'분석',review:'검수'};
+ const names={queued:'대기',sources:'원문',discovery:'코드·연구실',code:'저장소',analysis:'분석',tensor_trace:'코드·텐서 추적',review:'검수'};
  el.innerHTML=`${progressGauge(Object.keys(names).indexOf(j.stage),Object.keys(names).length,'완료 단계 · 시간 비율 아님')}${j.status==='error'?'<b>분석 실패</b> · '+escape(j.error):`<button id="cancel-run">중지</button><div class="steps">${Object.entries(names).map(([k,n])=>`<span class="${j.stage===k?'current':''}">${n}</span>`).join('<span>→</span>')}</div>${escape(j.log.at(-1)?.message||'앞선 분석이 끝나면 시작합니다.')}`}`;
  if($('#cancel-run'))$('#cancel-run').onclick=async()=>{await api('research/cancel',{id:j.id});await refresh()};
 }
@@ -216,7 +216,7 @@ function progressGauge(done,total,label){const n=Math.max(0,Math.min(total,done)
 
 async function openPaperWalkthrough(p,r){
  const epoch=renderEpoch;let report=r||{};
- if(!report.walkthrough?.steps?.length&&/^2602\.15922(v\d+)?$/.test(p.arxiv||'')){
+ if((!report.walkthrough?.steps?.length||!report.walkthrough?.execution_profile?.config)&&/^2602\.15922(v\d+)?$/.test(p.arxiv||'')){
   $('#content').innerHTML='<p class="caption">연산 해설을 불러오는 중…</p>';
   try{const response=await fetch('/dreamzero-walkthrough.json');if(!response.ok)throw Error('연산 해설 자료를 찾지 못했습니다.');report={...report,walkthrough:await response.json()}}catch(e){if(epoch===renderEpoch)$('#content').textContent=e.message;return}
  }
