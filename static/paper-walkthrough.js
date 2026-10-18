@@ -7,7 +7,7 @@
   const host=document.querySelector('#content');if(!host)return;
   const data=report?.walkthrough,steps=Array.isArray(data?.steps)?data.steps.filter(x=>x&&typeof x==='object').slice(0,100):[];
   if(!steps.length){host.innerHTML='<div class="walk-empty"><h2>연산 해설</h2><p>이 논문에는 근거가 연결된 단계별 해설이 아직 없습니다. 코드와 설정을 확인한 분석 결과가 필요합니다.</p>'+`<p>${esc(data?.scope||'')}</p>${Array.isArray(data?.validation?.issues)?'<ul>'+data.validation.issues.map(v=>'<li>'+esc(v)+'</li>').join('')+'</ul>':''}`+'</div>';return}
-  let index=0,labCleanup=null;const hasLab=/^2602\.15922(?:v\d+)?$/.test(paper?.arxiv||'')&&typeof window.renderWalkthroughLab==='function';
+  let index=0,labCleanup=null,motionController=null,detailEpoch=0;const hasLab=/^2602\.15922(?:v\d+)?$/.test(paper?.arxiv||'')&&typeof window.renderWalkthroughLab==='function';
   const labels={source:'출처 기반 · 실행 검증 아님',illustrative:'설명용 예시',unknown:'확인 불가'},modes={training:'학습',inference:'추론',shared:'학습·추론 공통'};
   host.innerHTML=`<section class="paper-walkthrough"><header class="walk-heading"><div><h2>${esc(data.title||paper?.title||'연산 해설')}</h2><details class="walk-scope"><summary>해설 범위 · 실행 검증 여부</summary><p>${esc(data.scope||'코드와 논문을 읽는 단계별 해설입니다.')}</p></details></div><span class="walk-counter" aria-live="polite"></span></header><progress class="walk-progress" max="${steps.length}" value="1" aria-label="해설 읽기 진행"></progress><div class="walk-layout"><details class="walk-toc" open><summary>단계 목차</summary><nav aria-label="연산 단계">${steps.map((s,i)=>`<button type="button" data-walk-step="${i}"><span>${String(i+1).padStart(2,'0')}</span>${esc(s.title||'단계 '+(i+1))}</button>`).join('')}</nav></details><aside class="walk-visual" aria-label="연산 시각화"></aside><article class="walk-explanation" tabindex="-1"></article></div><footer class="walk-controls"><button type="button" class="walk-prev">← 이전</button><span>모델 실행 결과가 아닌 출처 기반 해설</span><button type="button" class="walk-next">다음 →</button></footer></section>`;
   const root=host.querySelector('.paper-walkthrough');
@@ -20,11 +20,28 @@
    root.querySelector('.walk-progress').before(section);
   }
 
-  function draw(focus=false){
+   function inspect(rowIndex,section='code'){
+   const token=++detailEpoch,s=steps[index],row=rowIndex>=0?s.shape_trace?.[rowIndex]:null,article=root.querySelector('.walk-explanation');
+   article.querySelector('.walk-operation-inspector')?.remove();const panel=document.createElement('section');panel.className='walk-operation-inspector';
+   const refs=[...(row?.evidence||[]),...(s.evidence||[])].filter((e,i,a)=>e&&href(e.url)&&a.findIndex(v=>v.url===e.url)===i);
+   panel.innerHTML=`<h3>${esc(row?.title||s.title)}</h3><nav>${['code','equation','derivation'].map((v,i)=>`<button data-inspect="${v}" aria-pressed="${section===v}">${['코드','수식','유도 과정'][i]}</button>`).join('')}</nav><div class="walk-inspector-content"></div>`;article.prepend(panel);
+   panel.querySelectorAll('[data-inspect]').forEach(b=>b.onclick=()=>inspect(rowIndex,b.dataset.inspect));const content=panel.querySelector('.walk-inspector-content');
+   if(section==='code'){
+    content.innerHTML=refs.length?`<label>근거 파일<select>${refs.map((r,i)=>`<option value="${i}">${esc(r.label||r.url)}</option>`).join('')}</select></label><p class="caption">고정 커밋의 코드 불러오는 중…</p><pre></pre>`:'<p>이 연산에 연결된 코드 근거가 없습니다.</p>';
+    const load=async i=>{const reference=refs[i],pre=content.querySelector('pre'),caption=content.querySelector('p');if(!reference)return;pre.textContent='';caption.textContent='고정 커밋의 코드 불러오는 중…';const chosen=++detailEpoch;try{const source=await api('research/source/'+encodeURIComponent(paper.id)+'?'+new URLSearchParams({url:reference.url}));if(chosen!==detailEpoch||!panel.isConnected)return;caption.textContent=source.path+':'+source.start+'–'+source.end+(source.truncated?' · 나머지는 원문 링크에서 확인':'');pre.textContent=source.code.split('\n').map((line,n)=>String(source.start+n).padStart(4,' ')+'  '+line).join('\n')}catch(e){if(chosen!==detailEpoch||!panel.isConnected)return;caption.textContent=e.message;pre.textContent=''}if(panel.isConnected){let a=content.querySelector('a');if(!a){a=document.createElement('a');a.target='_blank';a.rel='noopener noreferrer';a.textContent='고정 커밋 원문 열기 ↗';content.append(a)}a.href=href(reference.url)}};
+    const select=content.querySelector('select');if(select){select.onchange=()=>load(Number(select.value));load(0)}
+   }else if(section==='equation'){
+    const equation=row?.equation||s.equation;content.innerHTML=equation?`<div class="walk-equation">${esc(equation)}</div><p>${esc(row?.assumptions||s.explanation||'')}</p>`:'<p>이 연산에 별도로 확인된 수식이 없습니다.</p>';
+   }else{
+    const mechanics=Array.isArray(s.mechanics)?s.mechanics:[];content.innerHTML=`<p>${esc(row?.explanation||s.explanation||'')}</p>${row?.assumptions?`<p>선택 연산의 가정: ${esc(row.assumptions)}</p>`:''}<h4>이 단계의 수학적 전개 · 전제</h4>`+(mechanics.length?mechanics.map(m=>`<section><h4>${esc(m.title)}</h4><p>${esc(m.explanation)}</p><div class="walk-equation">${esc(m.equation||'별도로 기록된 수식 없음')}</div><p>${esc(m.assumptions||'')}</p></section>`).join(''):'<p>단계별 별도 유도는 아직 기록되지 않았습니다. 코드와 shape 변화로 확인할 수 있는 범위만 표시합니다.</p>');
+   }
+   if(typeof window.paperloomMath==='function'){panel.querySelectorAll('.walk-equation').forEach(el=>{const raw=el.textContent;if(!raw.includes('$')&&/\\(?:frac|sum|prod|mathrm|mathbf|mathbb|operatorname|sigma|theta|epsilon|begin|left|underbrace)\b/.test(raw))el.textContent='$$'+raw+'$$'});window.paperloomMath(panel)}
+  }
+  function draw(focus=false,syncMotion=true){
    if(labCleanup){labCleanup();labCleanup=null}
    const s=steps[index],status=labels[s.verification]||labels.unknown,mode=modes[s.mode]||'적용 모드 확인 필요';
    root.querySelector('.walk-counter').textContent=`${index+1} / ${steps.length}`;root.querySelector('progress').value=index+1;
-   root.querySelectorAll('[data-walk-step]').forEach((b,i)=>{b.classList.toggle('active',i===index);if(i===index)b.setAttribute('aria-current','step');else b.removeAttribute('aria-current')});
+  root.querySelectorAll('[data-walk-step]').forEach((b,i)=>{b.classList.toggle('active',i===index);if(i===index)b.setAttribute('aria-current','step');else b.removeAttribute('aria-current')});
    const evidence=(Array.isArray(s.evidence)?s.evidence:[]).filter(e=>e&&href(e.url));
    const article=root.querySelector('.walk-explanation');article.innerHTML=`<div class="walk-badges"><span>${esc(mode)}</span><span class="walk-verification">${esc(status)}</span></div><h3>${esc(s.title||'단계 '+(index+1))}</h3><p class="walk-prose">${esc(s.explanation||'설명 확인 불가')}</p>${s.equation?`<h4>관계식</h4><div class="walk-equation">${esc(text(s.equation))}</div>`:''}<h4>확인 근거</h4>${evidence.length?`<ul class="walk-evidence">${evidence.map(e=>`<li><a href="${esc(href(e.url))}" target="_blank" rel="noopener noreferrer">${esc(e.label||e.url)} ↗</a></li>`).join('')}</ul>`:'<p>연결된 원문·코드 근거가 없습니다.</p>'}`;
    const mechanics=Array.isArray(s.mechanics)?s.mechanics.filter(m=>m&&typeof m==='object').slice(0,30):[];
@@ -42,7 +59,7 @@
     const section=document.createElement('div');section.className='walk-concepts';section.innerHTML='<h4>연결 개념</h4>'+concepts.map((n,i)=>`<button type="button" data-walk-concept="${i}">${esc(n)} ↗</button>`).join('');article.append(section);
     section.querySelectorAll('button').forEach(b=>b.onclick=async()=>{b.disabled=true;try{const name=concepts[Number(b.dataset.walkConcept)],list=await api('concepts');let v=list.find(c=>String(c.name).toLowerCase()===name.toLowerCase());if(paper?.id||!v)v=await api('concept/create',{name,...(paper?.id?{paper_id:paper.id}:{})});if(root.isConnected)await openNotebook(v.id)}catch(e){if(typeof toast==='function')toast(e.message);else{const error=document.createElement('p');error.textContent=e.message;section.append(error)}}finally{b.disabled=false}});
    }
-   const visual=root.querySelector('.walk-visual');visual.innerHTML=`<div class="walk-diagram"><div class="walk-tensor"><span>입력 shape</span><code>${esc(text(s.input_shape))}</code></div><span class="walk-arrow" aria-hidden="true">↓</span><div class="walk-operation">${esc(s.operation||'연산 확인 필요')}</div><span class="walk-arrow" aria-hidden="true">↓</span><div class="walk-tensor"><span>출력 shape</span><code>${esc(text(s.output_shape))}</code></div><p class="walk-visual-note">${esc(status)}. 차원 기호와 설정은 연결된 코드 근거를 확인하세요.</p></div>`;
+   const outer=root.querySelector('.walk-visual');let visual=outer.querySelector('.walk-shape-details');if(!visual){if(typeof window.mountTensorMotion==='function'){const motion=document.createElement('div');motion.className='walk-motion-host';const details=document.createElement('details');details.className='walk-static-trace';details.innerHTML='<summary>정적 shape · 전체 연산표</summary><div class="walk-shape-details"></div>';outer.append(motion,details);visual=details.querySelector('.walk-shape-details')}else{visual=outer}}visual.innerHTML=`<div class="walk-diagram"><div class="walk-tensor"><span>입력 shape</span><code>${esc(text(s.input_shape))}</code></div><span class="walk-arrow" aria-hidden="true">↓</span><div class="walk-operation">${esc(s.operation||'연산 확인 필요')}</div><span class="walk-arrow" aria-hidden="true">↓</span><div class="walk-tensor"><span>출력 shape</span><code>${esc(text(s.output_shape))}</code></div><p class="walk-visual-note">${esc(status)}. 차원 기호와 설정은 연결된 코드 근거를 확인하세요.</p></div>`;
    if(['permute','patchify'].includes(s.operation)){
     const demo=document.createElement('section');demo.className='walk-matrix-demo';
     const transpose=s.operation==='permute',values=transpose?[1,2,3,4,5,6]:Array.from({length:16},(_,i)=>i+1);
@@ -71,9 +88,11 @@
     details.ontoggle=()=>{if(!details.open||mounted||!lab.isConnected)return;mounted=true;try{const cleanup=window.renderWalkthroughLab(lab,paper,s);if(typeof cleanup==='function')labCleanup=cleanup}catch{lab.textContent='교육용 예시를 불러오지 못했습니다.'}};
    }
    visual.querySelectorAll('.walk-matrix-demo,.walk-attention').forEach(demo=>{const details=document.createElement('details');details.className='walk-demo-disclosure';const summary=document.createElement('summary');summary.textContent='별도 교육 예시 · 작은 배열로 계산';demo.before(details);details.append(summary,demo)});
-   root.querySelector('.walk-prev').disabled=index===0;root.querySelector('.walk-next').disabled=index===steps.length-1;if(focus)article.focus({preventScroll:true});
+   root.querySelector('.walk-prev').disabled=index===0;root.querySelector('.walk-next').disabled=index===steps.length-1;if(focus)article.focus({preventScroll:true});if(motionController&&syncMotion)motionController.select(s.id);detailEpoch++;
   }
   root.querySelectorAll('[data-walk-step]').forEach(b=>b.onclick=()=>{index=Number(b.dataset.walkStep);draw(true)});
   root.querySelector('.walk-prev').onclick=()=>{if(index>0){index--;draw(true)}};root.querySelector('.walk-next').onclick=()=>{if(index<steps.length-1){index++;draw(true)}};draw();
+  if(typeof window.mountTensorMotion==='function'){motionController=window.mountTensorMotion(root.querySelector('.walk-motion-host'),paper,data,{autoGenerate:true,onStep:(id,row,section)=>{const next=steps.findIndex(s=>s.id===id);if(next<0)return;index=next;draw(false,false);inspect(row,section)}})}
+  const observer=new MutationObserver(()=>{if(!root.isConnected){motionController?.dispose();labCleanup?.();observer.disconnect()}});observer.observe(host,{childList:true});
  };
 })();
