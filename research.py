@@ -363,8 +363,12 @@ No guesses. No project URL means no official repository claim. This is single pa
 Return ONLY one JSON object with these keys (all section content in Markdown, Korean):
 {"tldr":"3 sentences", "eli5":"plain explanation + analogy and its limits", "overview":"problem, contribution and end-to-end flow", "method":"deep methodology with module input/output/shape table, intuitive explanation -> formal definition -> 1-3 actual LaTeX equations -> derivation/limit interpretation -> code mapping. Use $ and $$", "experiments":"Experimental / Evaluation Setup, main numeric result table, numeric ablation table with original table numbers and comparison venue/year; unknown slots explicit", "code":"actual core snippets with path/function/line/commit and equation mapping, config and paper-code differences; or exact unavailable reason", "labs":"authors with PAPER-TIME affiliation vs CURRENT lab, independently sourced current work from discovery.json; no reputation claims", "limitations":"paper limitations vs analyst inferences, missing sources and why", "questions":["followup question"], "sources":[{"title":"","url":"","kind":"paper|code|lab|project"}], "checks":[{"name":"method / equations / numeric ablation / code / affiliations / recent work","status":"supported|partial|unavailable","reason":"evidence or exact missing item"}]}
 Do not claim code was cloned unless code-status.json says so. Cite URLs in every major section. Sources should only list URLs actually read. Omit distant unrelated literature. Do not fabricate a diagram image; describe the verified forward flow.''' 
+            detail_guide=SKILLS/'tensor-evidence-analysis.md'
+            if detail_guide.is_file():prompt+='\n'+detail_guide.read_text()
+            prompt+='\nAdditional required JSON fields: related_work (Markdown), tensor_trace (Markdown), model_graph (object as specified in the guide). If unavailable, explain exactly why in the two Markdown fields and return an empty graph.'
             report=parse_json(cli(jid,prompt,run,'brief',timeout=1200))
-            needed=['tldr','eli5','overview','method','experiments','code','labs','limitations','sources','checks']
+            report['model_graph']=normalize_model_graph(report.get('model_graph'),report.get('sources',[]))
+            needed=['tldr','eli5','overview','method','experiments','code','labs','limitations','related_work','tensor_trace','sources','checks']
             if any(k not in report for k in needed): raise ValueError('분석 응답에 필수 섹션이 누락되었습니다.')
             if any(not isinstance(report[k],str) or not report[k].strip() for k in needed[:-2]): raise ValueError('브리프 섹션 형식이 잘못되었습니다.')
             if any(not isinstance(report[k],list) or any(not isinstance(x,dict) for x in report[k]) for k in ('sources','checks')): raise ValueError('출처/검수 구조가 잘못되었습니다.')
@@ -387,9 +391,34 @@ Do not claim code was cloned unless code-status.json says so. Cite URLs in every
     finally:
         persist_job(jid)
 
+def normalize_model_graph(value, sources):
+    from urllib.parse import urlsplit
+    def url(v):
+        if not isinstance(v,str):return ''
+        try:return v if urlsplit(v).scheme=='https' and urlsplit(v).hostname else ''
+        except ValueError:return ''
+    if not isinstance(value,dict):return {'center':'','nodes':[],'edges':[]}
+    allowed={url(x.get('url')) for x in sources if isinstance(x,dict)}-{''}
+    nodes=[];ids=set()
+    for n in (value.get('nodes') if isinstance(value.get('nodes'),list) else [])[:24]:
+        if not isinstance(n,dict):continue
+        ident=str(n.get('id',''))[:100]
+        if not ident or ident in ids or not n.get('label'):continue
+        item={k:str(n.get(k,'') or '')[:2000] for k in ('label','owner','concept','summary')}
+        item.update(id=ident,paper_url=url(n.get('paper_url')),code_url=url(n.get('code_url')))
+        nodes.append(item);ids.add(ident)
+    edges=[]
+    for e in (value.get('edges') if isinstance(value.get('edges'),list) else [])[:100]:
+        if not isinstance(e,dict) or e.get('kind') not in ('adopted','implementation','related'):continue
+        if e.get('source') not in ids or e.get('target') not in ids or e['source']==e['target']:continue
+        evidence=[{'url':v['url'],'label':str(v.get('label','근거'))[:200]} for v in (e.get('evidence') if isinstance(e.get('evidence'),list) else []) if isinstance(v,dict) and v.get('url') in allowed]
+        if not evidence or not e.get('reason'):continue
+        edges.append({**{k:str(e.get(k,'') or '')[:2000] for k in ('source','target','kind','version','reason')},'evidence':evidence})
+    return {'center':value.get('center') if value.get('center') in ids else (nodes[0]['id'] if nodes else ''),'nodes':nodes,'edges':edges,'checked':now()[:10]}
+
 def review_draft(jid,run):
     try:
-        value=parse_json(cli(jid,RESEARCH_RULES+'''\nReview draft.json against paper.txt, paper-pdf.txt, discovery.json and code-status.json; inspect code if present. Check numeric results/table settings, equations and symbol definitions, claims vs evidence, actual code snippets/commit anchors, affiliation vs lab, dates, and unknowns. Do not mark missing facts as verified. Return ONLY {"verdict":"pass|needs_review","issues":["specific issue"],"corrections":[{"section":"tldr|eli5|overview|method|experiments|code|labs|limitations","replacement":"complete corrected section Markdown"}]}. Apply all corrections you can support. No fabrication. Missing official code is a limitation, not a reason to invent code. This is single paper, not full survey completion.''',run,'review',timeout=600))
+        value=parse_json(cli(jid,RESEARCH_RULES+'''\nReview draft.json against paper.txt, paper-pdf.txt, discovery.json and code-status.json; inspect code if present. Check numeric results/table settings, equations and symbol definitions, claims vs evidence, actual code snippets/commit anchors, related-work relation types and model_graph adoption evidence, every tensor_trace reshape/matmul/broadcast/mask and train-versus-inference path, experiment-to-module linkage, affiliation vs lab, dates, and unknowns. Do not mark missing facts as verified. Return ONLY {"verdict":"pass|needs_review","issues":["specific issue"],"corrections":[{"section":"tldr|eli5|overview|method|experiments|code|labs|limitations|related_work|tensor_trace","replacement":"complete corrected section Markdown"}]}. Apply all corrections you can support. No fabrication. Missing official code is a limitation, not a reason to invent code. This is single paper, not full survey completion.''',run,'review',timeout=600))
         if not isinstance(value,dict) or value.get('verdict') not in ('pass','needs_review') or not isinstance(value.get('issues'),list) or not isinstance(value.get('corrections',[]),list):raise ValueError('검수 응답 형식 오류')
         if any(not isinstance(f,dict) for f in value.get('corrections',[])):raise ValueError('검수 수정 형식 오류')
         return value
@@ -413,7 +442,7 @@ def start(pid):
 def export_markdown(p):
     if not p.get('reports'): raise ValueError('분석된 브리프가 없습니다.')
     r=p['reports'][-1]
-    labels={'tldr':'TL;DR','eli5':'쉽게 이해하기','overview':'Overview','method':'Methodology & Implementation','experiments':'Experiments & Ablations','code':'Code Analysis','labs':'Authors, Affiliations & Labs','limitations':'Limitations'}
+    labels={'tldr':'TL;DR','eli5':'쉽게 이해하기','overview':'Overview','method':'Methodology & Implementation','experiments':'Experiments & Ablations','code':'Code Analysis','labs':'Authors, Affiliations & Labs','limitations':'Limitations','related_work':'Related Work','tensor_trace':'Tensor Trace'}
     return '# '+p['title']+'\n\n'+p['url']+'\n\n분석일: '+r['created']+'\n\n'+'\n\n'.join('## '+title+'\n\n'+str(r.get(k,'')) for k,title in labels.items())+'\n\n## Review\n\n'+json.dumps(r['review'],ensure_ascii=False,indent=2)
 
 # The MCP bridge accepts only metadata. The calling client owns its Notion OAuth session.

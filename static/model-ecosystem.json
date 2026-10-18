@@ -1,0 +1,104 @@
+{
+  "center": "dreamzero",
+  "checked": "2026-10-18",
+  "nodes": [
+    {
+      "id": "dreamzero",
+      "label": "DreamZero",
+      "owner": "DreamZero 저자팀",
+      "concept": "World Action Models",
+      "paper_url": "https://arxiv.org/abs/2602.15922",
+      "code_url": "https://github.com/dreamzero0/dreamzero",
+      "summary": "영상과 행동을 공동 예측하는 로봇 정책. 관계마다 채택 버전과 비교 범위를 확인합니다."
+    },
+    {
+      "id": "wan",
+      "label": "Wan",
+      "owner": "Alibaba Group / Wan Team",
+      "concept": "Wan Video Models",
+      "paper_url": "https://arxiv.org/abs/2503.20314",
+      "code_url": "https://github.com/Wan-Video/Wan2.1",
+      "summary": "DreamZero의 기본 백본은 Wan2.1-I2V-14B. Wan2.2-5B 구성 안내는 원 논문 결과와 구분합니다."
+    },
+    {
+      "id": "ltx",
+      "label": "LTX",
+      "owner": "Lightricks",
+      "concept": "LTX Video Models",
+      "paper_url": "https://arxiv.org/abs/2501.00103",
+      "code_url": "https://github.com/Lightricks/LTX-Video",
+      "summary": "VAE 압축과 영상 생성 효율을 비교할 기술 계열. DreamZero의 LTX 채택은 확인되지 않았습니다."
+    },
+    {
+      "id": "sana",
+      "label": "SANA",
+      "owner": "NVlabs / 원형 논문 NVIDIA·MIT·Tsinghua",
+      "concept": "SANA Model Family",
+      "paper_url": "https://arxiv.org/abs/2410.10629",
+      "code_url": "https://github.com/NVlabs/Sana",
+      "summary": "원형은 이미지 생성. SANA-Video·SANA-WM은 별도 확장입니다. 카메라 제어를 로봇 조작 정책으로 간주하지 않습니다."
+    }
+  ],
+  "edges": [
+    {
+      "source": "wan",
+      "target": "dreamzero",
+      "kind": "adopted",
+      "version": "Wan2.1-I2V-14B",
+      "reason": "공식 DreamZero 구현 안내가 기본 백본으로 명시합니다.",
+      "evidence": [
+        {
+          "url": "https://github.com/dreamzero0/dreamzero/blob/main/docs/WAN22_BACKBONE.md",
+          "label": "공식 백본 안내"
+        }
+      ]
+    },
+    {
+      "source": "wan",
+      "target": "dreamzero",
+      "kind": "implementation",
+      "version": "Wan2.2-TI2V-5B",
+      "reason": "현재 저장소의 DROID 학습 대안입니다. 원 논문의 14B 실험 성능을 이 구성에 귀속하지 않습니다.",
+      "evidence": [
+        {
+          "url": "https://github.com/dreamzero0/dreamzero/blob/main/docs/WAN22_BACKBONE.md",
+          "label": "별도 학습 구성"
+        }
+      ]
+    },
+    {
+      "source": "ltx",
+      "target": "dreamzero",
+      "kind": "related",
+      "version": "기술 비교 · 분석자 분류",
+      "reason": "VAE 압축과 영상 생성 효율을 비교할 기술 계열. DreamZero의 LTX 채택은 확인되지 않았습니다. 원 논문의 인용 또는 백본 채택을 뜻하지 않습니다.",
+      "evidence": [
+        {
+          "url": "https://arxiv.org/abs/2501.00103",
+          "label": "LTX 원 논문"
+        },
+        {
+          "url": "https://arxiv.org/abs/2602.15922",
+          "label": "DreamZero 원 논문"
+        }
+      ]
+    },
+    {
+      "source": "sana",
+      "target": "dreamzero",
+      "kind": "related",
+      "version": "기술 비교 · 분석자 분류",
+      "reason": "원형은 이미지 생성. SANA-Video·SANA-WM은 별도 확장입니다. 카메라 제어를 로봇 조작 정책으로 간주하지 않습니다. 원 논문의 인용 또는 백본 채택을 뜻하지 않습니다.",
+      "evidence": [
+        {
+          "url": "https://arxiv.org/abs/2410.10629",
+          "label": "SANA 원 논문"
+        },
+        {
+          "url": "https://arxiv.org/abs/2602.15922",
+          "label": "DreamZero 원 논문"
+        }
+      ]
+    }
+  ]
+}

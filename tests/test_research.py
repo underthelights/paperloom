@@ -64,7 +64,7 @@ class ResearchTests(unittest.TestCase):
     def test_analysis_review_preserves_concurrent_user_note(self):
         research.import_candidates([{'Title':'Pipeline fixture'}]);p=research.all_records()[0];p.update(arxiv='2303.04137',url='https://arxiv.org/abs/2303.04137');research.save(p)
         jid='pipeline-fixture';research.JOBS[jid]={'id':jid,'paper_id':p['id'],'cancel':False,'status':'queued','log':[]}
-        report={k:'source-supported fixture' for k in ['tldr','eli5','overview','method','experiments','code','labs','limitations']};report.update(sources=[],checks=[])
+        report={k:'source-supported fixture' for k in ['tldr','eli5','overview','method','experiments','code','labs','limitations','related_work','tensor_trace']};report.update(sources=[],checks=[])
         responses=[json.dumps({'code':{'url':'','reason':'unavailable'}}),json.dumps(report),json.dumps({'verdict':'needs_review','issues':['lab unavailable'],'corrections':[]})]
         def agent(*args,**kwargs):
             current=research.get(p['id']);current['notes']='written while analyzing';research.save(current)
