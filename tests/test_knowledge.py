@@ -1,4 +1,5 @@
 import json,unittest
+from pathlib import Path
 from unittest.mock import patch
 import test_research as base
 import research as R,reader,intake,knowledge as K
@@ -29,6 +30,18 @@ class KnowledgeTests(unittest.TestCase):
         a=K.people('1')['items'][0];a['kind']='person';K.put(a)
         with patch.object(R,'cli',return_value=json.dumps({'identity_status':'unverified','education':[{'degree':'PhD','evidence_url':'https://example.com'}],'current_affiliation':'Invented'})):K.worker(a['id'])
         profile=K.get(a['id'])['profile'];self.assertEqual(profile['education'],[]);self.assertEqual(profile['current_affiliation'],'확인 불가')
+    def test_ecosystem_generation_retains_existing_research_and_notes(self):
+        v=K.create('Video Diffusion Models','1');v.update(markdown='Prior sourced comparison',notes='Personal draft');K.put(v)
+        with patch.object(R,'SKILLS',Path(__file__).resolve().parents[1]/'research-skills'), patch.object(R,'cli',return_value='Updated comparison') as cli:
+            K.worker(v['id'])
+        prompt=cli.call_args.args[1]
+        self.assertIn('Prior sourced comparison',prompt)
+        self.assertIn('checkpoint licenses',prompt)
+        self.assertIn('Wan2.1',prompt)
+        self.assertIn('SANA-WM',prompt)
+        self.assertEqual(K.get(v['id'])['notes'],'Personal draft')
+        self.assertEqual(K.get(v['id'])['papers'],['1'])
+
     def test_video_rejects_code_and_path_escape(self):
         v=K.create('Async')
         with self.assertRaises(ValueError):K.video({'id':v['id'],'template':'exec(x)'})

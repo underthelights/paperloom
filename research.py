@@ -155,6 +155,54 @@ def add(value):
                 break
         return save(p)
 
+
+PDF_LIMIT = 24 * 1024 * 1024
+
+def local_pdf_path(p):
+    digest=p.get('pdf_sha256','')
+    if not isinstance(digest,str) or not re.fullmatch('[a-f0-9]{64}',digest):raise ValueError('저장된 PDF 식별자가 잘못되었습니다.')
+    return DATA/'uploads'/(digest+'.pdf')
+
+def add_pdf(payload):
+    import base64,binascii
+    from pypdf import PdfReader
+    encoded=payload.get('content','')
+    if not isinstance(encoded,str) or len(encoded)>4*((PDF_LIMIT+2)//3):raise ValueError('PDF는 24MB 이하만 지원합니다.')
+    try:raw=base64.b64decode(encoded,validate=True)
+    except (ValueError,binascii.Error):raise ValueError('PDF 전송 데이터가 잘못되었습니다.')
+    if len(raw)>PDF_LIMIT or not raw.startswith(b'%PDF-'):raise ValueError('유효한 PDF 파일을 선택하세요. 최대 24MB입니다.')
+    digest=hashlib.sha256(raw).hexdigest();identity='pdf:'+digest
+    with LOCK:
+        for existing in all_records():
+            if existing['identity']==identity:return existing
+    try:
+        pdf=PdfReader(io.BytesIO(raw))
+        if pdf.is_encrypted:raise ValueError('암호화된 PDF는 잠금을 해제한 뒤 추가하세요.')
+        if not 0<len(pdf.pages)<=500:raise ValueError('PDF는 1–500쪽만 지원합니다.')
+        pages=[];total=0
+        for page in pdf.pages:
+            text=page.extract_text() or '';total+=len(text)
+            if total>2000000:raise ValueError('PDF 추출 본문은 200만 자 이하만 지원합니다.')
+            pages.append(text)
+        meta=pdf.metadata or {}
+    except ValueError:raise
+    except Exception:raise ValueError('PDF를 읽을 수 없습니다. 손상 여부를 확인하세요.')
+    filename=Path(str(payload.get('filename','paper.pdf')).replace('\\','/')).name[:240]
+    title=str(payload.get('title') or meta.get('/Title') or Path(filename).stem).strip()[:500] or '제목 없는 PDF'
+    author=str(meta.get('/Author') or '').strip()[:500]
+    p={'id':uuid.uuid4().hex,'identity':identity,'title':title,'authors':[author] if author else [],'year':'','url':'','arxiv':'','abstract':'','status':'ready','source':'PDF','captured':now(),'notes':'','chat':[],'reports':[],'references':[], 'pdf_sha256':digest,'pdf_filename':filename,'pdf_pages':len(pages),'pdf_text_chars':total,'pdf_extraction':'text' if total>=1500 else 'needs_ocr'}
+    with LOCK:
+        for existing in all_records():
+            if existing['identity']==identity:return existing
+        path=local_pdf_path(p);path.parent.mkdir(parents=True,exist_ok=True)
+        for target,data in [(path,raw),(path.with_suffix('.json'),json.dumps({'pages':pages},ensure_ascii=False).encode())]:
+            temp=target.with_suffix('.'+uuid.uuid4().hex+'.tmp');temp.write_bytes(data);temp.replace(target)
+        return save(p)
+
+def local_pdf_pages(p):
+    return json.loads(local_pdf_path(p).with_suffix('.json').read_text())['pages']
+
+
 def state():
     records=all_records(); fields=('id','title','status','authors','year','url','arxiv','source','updated','category','openalex','doi')
     with db() as c: meta={r[0]:json.loads(r[1]) for r in c.execute('SELECT * FROM meta')}
@@ -195,7 +243,26 @@ def cancel(jid):
 def shutdown():
     for jid in list(JOBS): cancel(jid)
 
+def bibliography(article,aid):
+    refs=[]
+    for b in article.select('.ltx_bibitem'):
+        title=b.select_one('.ltx_bib_title');blocks=b.select('.ltx_bibblock')
+        if title is None and len(blocks)>=2:title=blocks[1]
+        refs.append({'id':b.get('id',''),'title':title.get_text(' ',strip=True).strip('. ') if title else b.get_text(' ',strip=True)[:220],
+                     'citation':b.get_text(' ',strip=True),'source':'https://arxiv.org/html/'+aid+'#'+b.get('id',''),
+                     'urls':[urljoin('https://arxiv.org/html/'+aid,a['href']) for a in b.select('a[href]') if a['href'].startswith(('https://','http://'))]})
+    return refs
+
 def collect(p,run):
+    if p.get('pdf_sha256'):
+        raw=local_pdf_path(p).read_bytes();pages=local_pdf_pages(p)
+        text='\n\n'.join('[p.'+str(i+1)+']\n'+page for i,page in enumerate(pages))
+        if sum(len(page.strip()) for page in pages)<1500:raise ValueError('분석할 본문이 부족합니다. 스캔 PDF는 OCR 처리 후 다시 추가하세요. 원본 PDF는 보존되어 있습니다.')
+        (run/'paper.pdf').write_bytes(raw)
+        (run/'paper-pdf.txt').write_text(text);(run/'paper.txt').write_text(text)
+        sources=[{'kind':'pdf','url':'/api/research/pdf/'+p['id'],'sha256':p['pdf_sha256'],'retrieved':now(),'extraction':'PDF text; layout, equations and tables require original-page verification'}]
+        (run/'sources.json').write_text(json.dumps(sources,ensure_ascii=False,indent=2))
+        return text,[],sources
     aid=p['arxiv']; sources=[]; refs=[];html='';text=''
     try:
         html=fetch('https://arxiv.org/html/'+aid).decode('utf-8','replace')
@@ -203,11 +270,7 @@ def collect(p,run):
         if not article: raise ValueError('HTML 본문이 없습니다.')
         for math in article.select('math'):
             if math.get('alttext'): math.replace_with(' $'+math['alttext']+'$ ')
-        for b in article.select('.ltx_bibitem'):
-            title=b.select_one('.ltx_bib_title')
-            refs.append({'id':b.get('id',''),'title':title.get_text(' ',strip=True).strip('. ') if title else b.get_text(' ',strip=True)[:220],
-                         'citation':b.get_text(' ',strip=True),'source':'https://arxiv.org/html/'+aid+'#'+b.get('id',''),
-                         'urls':[urljoin('https://arxiv.org/html/'+aid,a['href']) for a in b.select('a[href]') if a['href'].startswith(('https://','http://'))]})
+        refs=bibliography(article,aid)
         text=article.get_text('\n',strip=True)
         (run/'paper.html').write_text(html)
         sources.append({'kind':'paper','url':'https://arxiv.org/html/'+aid,'retrieved':now(),'sha256':hashlib.sha256(html.encode()).hexdigest()})
@@ -258,7 +321,7 @@ def collect_figures(aid,run):
         except Exception: continue
     return figures
 
-def cli(jid,prompt,run,name,timeout=900,intake=False):
+def cli(jid,prompt,run,name,timeout=900,intake=False,reasoning="medium"):
     executable=desktop_ai.codex_path()
     if not executable: raise ValueError('Codex CLI 설치와 로그인이 필요합니다.')
     output=run/(name+'.txt')
@@ -266,7 +329,8 @@ def cli(jid,prompt,run,name,timeout=900,intake=False):
          '-c','web_search="live"','-c','model_reasoning_effort="high"','--json','--output-last-message',str(output),'-C',str(run),'-']
     if intake:
         cmd[-1:-1]=['--disable','shell_tool']
-        cmd[cmd.index('model_reasoning_effort="high"')]='model_reasoning_effort="medium"'
+        if reasoning not in ('low','medium','high'):raise ValueError('Invalid reasoning effort')
+        cmd[cmd.index('model_reasoning_effort="high"')]='model_reasoning_effort="'+reasoning+'"'
     env=os.environ.copy();env['PATH']='/opt/homebrew/bin:/usr/local/bin:'+env.get('PATH','')
     (run/(name+'-prompt.txt')).write_text(prompt)
     with (run/(name+'-events.jsonl')).open('w') as stdout, (run/(name+'-stderr.txt')).open('w') as stderr:
@@ -337,11 +401,11 @@ def run_analysis(jid,pid):
             with LOCK: JOBS[jid]['status']='running'
             p=get(pid);run=DATA/'runs'/jid;run.mkdir(parents=True)
             text,refs,sources=collect(p,run)
-            figures=collect_figures(p['arxiv'],run)
+            figures=collect_figures(p['arxiv'],run) if p.get('arxiv') else []
             with LOCK:
                 p=get(pid);p.update(references=refs,sources=sources,last_run=jid,figures=figures,citation_context=citation_context(run));save(p)
             mark(jid,'discovery','공식 코드·저자 소속·연구실·최근 연구 확인')
-            prompt=RESEARCH_RULES+'\nToday: '+now()+'''\nRead paper.txt and paper-pdf.txt in this directory. Search the web for the paper official project/code and author/lab pages, then recent lab works (last 24 months as of today). You must actually open primary URLs. Return ONLY JSON with keys:
+            prompt=RESEARCH_RULES+'\nToday: '+now()+'''\nRead paper.txt and paper-pdf.txt in this directory. A local uploaded PDF may have no arXiv or public URL. Never substitute a similar-titled paper or infer an official repository from its name; verify exact identity first. PDF text extraction is not recovered TeX; equations, tables and reading order may be incomplete. Preserve unknowns. Search the web for the paper official project/code and author/lab pages, then recent lab works (last 24 months as of today). You must actually open primary URLs. Return ONLY JSON with keys:
 {"code":{"url":"official GitHub root or empty","evidence_url":"paper/project page linking repo","reason":""},"project_urls":[],"affiliations":[{"author":"","paper_affiliation":"","current_affiliation":"확인 불가 if unknown","lab":"확인 불가 if unknown","evidence_urls":[],"note":""}],"recent_work":[{"title":"","url":"primary paper URL","date":"YYYY-MM or explicit unknown","lab":"","relationship":"why connected; no unproven membership","evidence_url":"lab publication page"}],"limitations":[]}
 No guesses. No project URL means no official repository claim. This is single paper enrichment, not a topic survey. Paper: '''+json.dumps({k:p.get(k) for k in ('title','url','authors')},ensure_ascii=False)
             discovery=parse_json(cli(jid,prompt,run,'discovery'))
@@ -356,14 +420,18 @@ No guesses. No project URL means no official repository claim. This is single pa
 Return ONLY one JSON object with these keys (all section content in Markdown, Korean):
 {"tldr":"3 sentences", "eli5":"plain explanation + analogy and its limits", "overview":"problem, contribution and end-to-end flow", "method":"deep methodology with module input/output/shape table, intuitive explanation -> formal definition -> 1-3 actual LaTeX equations -> derivation/limit interpretation -> code mapping. Use $ and $$", "experiments":"Experimental / Evaluation Setup, main numeric result table, numeric ablation table with original table numbers and comparison venue/year; unknown slots explicit", "code":"actual core snippets with path/function/line/commit and equation mapping, config and paper-code differences; or exact unavailable reason", "labs":"authors with PAPER-TIME affiliation vs CURRENT lab, independently sourced current work from discovery.json; no reputation claims", "limitations":"paper limitations vs analyst inferences, missing sources and why", "questions":["followup question"], "sources":[{"title":"","url":"","kind":"paper|code|lab|project"}], "checks":[{"name":"method / equations / numeric ablation / code / affiliations / recent work","status":"supported|partial|unavailable","reason":"evidence or exact missing item"}]}
 Do not claim code was cloned unless code-status.json says so. Cite URLs in every major section. Sources should only list URLs actually read. Omit distant unrelated literature. Do not fabricate a diagram image; describe the verified forward flow.''' 
+            detail_guide=SKILLS/'tensor-evidence-analysis.md'
+            if detail_guide.is_file():prompt+='\n'+detail_guide.read_text()
+            prompt+='\nAdditional required JSON fields: related_work (Markdown), tensor_trace (Markdown), model_graph (object as specified in the guide). If unavailable, explain exactly why in the two Markdown fields and return an empty graph.'
             report=parse_json(cli(jid,prompt,run,'brief',timeout=1200))
-            needed=['tldr','eli5','overview','method','experiments','code','labs','limitations','sources','checks']
+            report['model_graph']=normalize_model_graph(report.get('model_graph'),report.get('sources',[]))
+            needed=['tldr','eli5','overview','method','experiments','code','labs','limitations','related_work','tensor_trace','sources','checks']
             if any(k not in report for k in needed): raise ValueError('분석 응답에 필수 섹션이 누락되었습니다.')
             if any(not isinstance(report[k],str) or not report[k].strip() for k in needed[:-2]): raise ValueError('브리프 섹션 형식이 잘못되었습니다.')
             if any(not isinstance(report[k],list) or any(not isinstance(x,dict) for x in report[k]) for k in ('sources','checks')): raise ValueError('출처/검수 구조가 잘못되었습니다.')
             mark(jid,'review','원문 대비 주장·수치·소속·코드 근거 검수')
             (run/'draft.json').write_text(json.dumps(report,ensure_ascii=False,indent=2))
-            review=parse_json(cli(jid,RESEARCH_RULES+'''\nReview draft.json against paper.txt, paper-pdf.txt, discovery.json and code-status.json; inspect code if present. Check numeric results/table settings, equations and symbol definitions, claims vs evidence, actual code snippets/commit anchors, affiliation vs lab, dates, and unknowns. Do not mark missing facts as verified. Return ONLY {"verdict":"pass|needs_review","issues":["specific issue"],"corrections":[{"section":"tldr|eli5|overview|method|experiments|code|labs|limitations","replacement":"complete corrected section Markdown"}]}. Apply all corrections you can support. No fabrication. Missing official code is a limitation, not a reason to invent code. This is single paper, not full survey completion.''',run,'review',timeout=600))
+            review=review_draft(jid,run)
             for fix in review.get('corrections',[]):
                 if fix.get('section') in needed[:-2] and isinstance(fix.get('replacement'),str): report[fix['section']]=fix['replacement']
             report.update(id=jid,created=now(),code_status=code,discovery=discovery,review=review,source_manifest=sources,scope='single-paper')
@@ -380,9 +448,48 @@ Do not claim code was cloned unless code-status.json says so. Cite URLs in every
     finally:
         persist_job(jid)
 
+def normalize_model_graph(value, sources):
+    from urllib.parse import urlsplit
+    def url(v):
+        if not isinstance(v,str):return ''
+        try:return v if urlsplit(v).scheme=='https' and urlsplit(v).hostname else ''
+        except ValueError:return ''
+    if not isinstance(value,dict):return {'center':'','nodes':[],'edges':[]}
+    allowed={url(x.get('url')) for x in (sources if isinstance(sources,list) else []) if isinstance(x,dict)}-{''}
+    nodes=[];ids=set()
+    for n in (value.get('nodes') if isinstance(value.get('nodes'),list) else [])[:24]:
+        if not isinstance(n,dict):continue
+        ident=n.get('id')
+        if not isinstance(ident,str) or not ident.strip() or len(ident)>100 or ident in ids:continue
+        if not isinstance(n.get('label'),str) or not n['label'].strip():continue
+        item={k:str(n.get(k,'') or '')[:2000] for k in ('label','owner','concept','summary')}
+        item.update(id=ident,paper_url=url(n.get('paper_url')),code_url=url(n.get('code_url')))
+        nodes.append(item);ids.add(ident)
+    edges=[]
+    for e in (value.get('edges') if isinstance(value.get('edges'),list) else [])[:100]:
+        if not isinstance(e,dict) or e.get('kind') not in ('adopted','implementation','related'):continue
+        if any(not isinstance(e.get(k),str) for k in ('source','target','reason')):continue
+        if e['source'] not in ids or e['target'] not in ids or e['source']==e['target'] or not e['reason'].strip():continue
+        evidence=[{'url':v['url'],'label':str(v.get('label','근거'))[:200]} for v in (e.get('evidence') if isinstance(e.get('evidence'),list) else []) if isinstance(v,dict) and isinstance(v.get('url'),str) and v['url'] in allowed]
+        if not evidence or not e.get('reason'):continue
+        edges.append({**{k:str(e.get(k,'') or '')[:2000] for k in ('source','target','kind','version','reason')},'evidence':evidence})
+    return {'center':value.get('center') if isinstance(value.get('center'),str) and value['center'] in ids else (nodes[0]['id'] if nodes else ''),'nodes':nodes,'edges':edges,'checked':now()[:10]}
+
+def review_draft(jid,run):
+    try:
+        value=parse_json(cli(jid,RESEARCH_RULES+'''\nReview draft.json against paper.txt, paper-pdf.txt, discovery.json and code-status.json; inspect code if present. Check numeric results/table settings, equations and symbol definitions, claims vs evidence, actual code snippets/commit anchors, related-work relation types and model_graph adoption evidence, every tensor_trace reshape/matmul/broadcast/mask and train-versus-inference path, experiment-to-module linkage, affiliation vs lab, dates, and unknowns. Do not mark missing facts as verified. Return ONLY {"verdict":"pass|needs_review","issues":["specific issue"],"corrections":[{"section":"tldr|eli5|overview|method|experiments|code|labs|limitations|related_work|tensor_trace","replacement":"complete corrected section Markdown"}]}. Apply all corrections you can support. No fabrication. Missing official code is a limitation, not a reason to invent code. This is single paper, not full survey completion.''',run,'review',timeout=600))
+        if not isinstance(value,dict) or value.get('verdict') not in ('pass','needs_review') or not isinstance(value.get('issues'),list) or not isinstance(value.get('corrections',[]),list):raise ValueError('검수 응답 형식 오류')
+        if any(not isinstance(f,dict) for f in value.get('corrections',[])):raise ValueError('검수 수정 형식 오류')
+        return value
+    except InterruptedError:
+        raise
+    except Exception as exc:
+        return {"verdict":"needs_review","issues":["자동 검수를 완료하지 못했습니다. 분석 초안을 보존했습니다: "+str(exc)[:600]],"corrections":[],"completed":False}
+
 def start(pid):
     p=get(pid)
-    if not p.get('arxiv'): raise ValueError('먼저 arXiv 원문을 선택하세요. 제목만 있는 후보를 분석 완료로 처리하지 않습니다.')
+    if not p.get('arxiv') and not p.get('pdf_sha256'): raise ValueError('먼저 arXiv 원문 또는 PDF를 추가하세요. 제목만 있는 후보를 분석 완료로 처리하지 않습니다.')
+    if p.get('pdf_sha256') and p.get('pdf_extraction')=='needs_ocr':raise ValueError('분석할 본문이 부족합니다. OCR 처리된 PDF를 추가하세요. 원본은 PDF 탭에서 읽을 수 있습니다.')
     with LOCK:
         active=[j for j in JOBS.values() if j['status'] in ('queued','running')]
         if any(j['paper_id']==pid for j in active): raise ValueError('이 논문을 이미 분석 중입니다.')
@@ -395,7 +502,7 @@ def start(pid):
 def export_markdown(p):
     if not p.get('reports'): raise ValueError('분석된 브리프가 없습니다.')
     r=p['reports'][-1]
-    labels={'tldr':'TL;DR','eli5':'쉽게 이해하기','overview':'Overview','method':'Methodology & Implementation','experiments':'Experiments & Ablations','code':'Code Analysis','labs':'Authors, Affiliations & Labs','limitations':'Limitations'}
+    labels={'tldr':'TL;DR','eli5':'쉽게 이해하기','overview':'Overview','method':'Methodology & Implementation','experiments':'Experiments & Ablations','code':'Code Analysis','labs':'Authors, Affiliations & Labs','limitations':'Limitations','related_work':'Related Work','tensor_trace':'Tensor Trace'}
     return '# '+p['title']+'\n\n'+p['url']+'\n\n분석일: '+r['created']+'\n\n'+'\n\n'.join('## '+title+'\n\n'+str(r.get(k,'')) for k,title in labels.items())+'\n\n## Review\n\n'+json.dumps(r['review'],ensure_ascii=False,indent=2)
 
 # The MCP bridge accepts only metadata. The calling client owns its Notion OAuth session.

@@ -16,6 +16,24 @@ class DiscoveryTests(unittest.TestCase):
         w=self.work('W1',[]);g=discovery.assemble(w,[],[],[])
         with patch.object(discovery,'graph',return_value=g):
             p=discovery.import_work('W1','W1');p['notes']='personal';research.save(p);again=discovery.import_work('W1','W1');self.assertEqual(p['id'],again['id']);self.assertEqual(again['notes'],'personal')
+    def test_latest_citations_and_failed_query_progress(self):
+        raw={'id':'https://openalex.org/W1','title':'Seed','referenced_works':['https://openalex.org/W2']}
+        calls=[]
+        def request(path,**kwargs):
+            calls.append(kwargs)
+            if path=='works/W1':return raw
+            if kwargs.get('filter')=='cites:W1':return {'results':[{'id':'https://openalex.org/W3','title':'Followup','referenced_works':['https://openalex.org/W1']}]}
+            return {'results':[]}
+        with patch.object(discovery,'request',side_effect=request):
+            graph=discovery.graph('W1',True)
+        self.assertTrue(any(c.get('sort')=='publication_date:desc' for c in calls))
+        self.assertEqual(discovery.progress('W1')['done'],5)
+        self.assertEqual(graph['updates']['incoming_status'],'ready')
+        with patch.object(discovery,'request',side_effect=ValueError('offline')):
+            with self.assertRaises(ValueError):discovery.graph('W1',True)
+        self.assertEqual(discovery.progress('W1')['status'],'error')
+        self.assertEqual(discovery.progress('W1')['done'],0)
+
     def test_external_id_validation(self):
         for value in ['../private','https://evil.invalid/x','W1?api_key=x']:
             with self.assertRaises(ValueError):discovery.wid(value)

@@ -269,6 +269,8 @@ class Handler(BaseHTTPRequestHandler):
         if not self.allowed(): return self.send({'error':'Invalid Host'},403)
         path=urlparse(self.path).path
         try:
+            if path.startswith('/api/reader/auto/'): return self.send(reader.auto_get(path.rsplit('/',1)[1]))
+            if path.startswith('/api/discovery/progress/'):return self.send(discovery.progress(path.rsplit('/',1)[1]))
             if path=='/api/catalog': return self.send(knowledge.catalog(dict(__import__('urllib.parse',fromlist=['parse_qsl']).parse_qsl(urlparse(self.path).query))))
             if path=='/api/concepts': return self.send(knowledge.concepts())
             if path.startswith('/api/people/'): return self.send(knowledge.people(path.rsplit('/',1)[1]))
@@ -284,7 +286,7 @@ class Handler(BaseHTTPRequestHandler):
                     headers['Content-Range']=f'bytes {start}-{end}/{len(raw)}';return self.send(raw[start:end+1],206,'video/mp4',headers)
                 return self.send(raw,ctype='video/mp4',headers=headers)
             if path.startswith('/api/concept/'): return self.send(knowledge.get(path.rsplit('/',1)[1]))
-            if path.startswith('/api/reader/document/'): return self.send(reader.document(path.rsplit('/',1)[1]))
+            if path.startswith('/api/reader/document/'): return self.send(reader.bilingual_document(path.rsplit('/',1)[1]))
             if path.startswith('/api/reader/annotations/'): return self.send(reader.annotations(path.rsplit('/',1)[1]))
             if path.startswith('/api/reader/image/'):
                 raw,kind=reader.image(*path.split('/')[-2:]);return self.send(raw,ctype=kind)
@@ -303,6 +305,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send((research.DATA/'runs'/run/name).read_bytes(),ctype='image/png' if name.endswith('.png') else 'image/jpeg')
             if path.startswith('/api/research/pdf/'):
                 p=research.get(path.rsplit('/',1)[1]); run=p.get('last_run','')
+                if p.get('pdf_sha256'):return self.send(research.local_pdf_path(p).read_bytes(),ctype='application/pdf')
                 if not re.fullmatch('[a-f0-9]{32}',run): raise ValueError('수집한 PDF가 없습니다.')
                 return self.send((research.DATA/'runs'/run/'paper.pdf').read_bytes(),ctype='application/pdf')
             if path=='/api/ai-status': return self.send(desktop_ai.status(sys.modules[__name__]))
@@ -325,10 +328,10 @@ class Handler(BaseHTTPRequestHandler):
                 asset=(ROOT/'static'/path.lstrip('/')).resolve()
                 if not asset.is_relative_to((ROOT/'static/pdf-assets').resolve()) or not asset.is_file(): return self.send({'error':'Not found'},404)
                 return self.send(asset.read_bytes(),ctype='application/wasm' if asset.suffix=='.wasm' else 'application/octet-stream')
-            files={'/knowledge.js':'knowledge.js','/knowledge.css':'knowledge.css','/workflow.js':'workflow.js','/discovery.js':'discovery.js','/discovery.css':'discovery.css','/reader.js':'reader.js','/reader.css':'reader.css','/':'research.html','/editor.html':'index.html','/inbox.js':'inbox.js','/inbox.css':'inbox.css','/research.js':'research.js','/research.css':'research.css','/math.js':'math.js','/katex.min.css':'katex.min.css','/app.js':'app.js','/style.css':'style.css','/cloud.js':'cloud.js','/library.html':'library.html','/editor.js':'editor.js','/editor.css':'editor.css','/reader-vendor.js':'reader-vendor.js','/pdf.worker.mjs':'pdf.worker.mjs','/pdf-viewer.css':'pdf-viewer.css'}
+            files={'/model-graph.js':'model-graph.js','/model-ecosystem.json':'model-ecosystem.json','/bilingual.js':'bilingual.js','/workspace.css':'workspace.css','/knowledge.js':'knowledge.js','/knowledge.css':'knowledge.css','/workflow.js':'workflow.js','/discovery.js':'discovery.js','/discovery.css':'discovery.css','/reader.js':'reader.js','/reader.css':'reader.css','/':'research.html','/editor.html':'index.html','/inbox.js':'inbox.js','/inbox.css':'inbox.css','/research.js':'research.js','/research.css':'research.css','/math.js':'math.js','/katex.min.css':'katex.min.css','/app.js':'app.js','/style.css':'style.css','/cloud.js':'cloud.js','/library.html':'library.html','/editor.js':'editor.js','/editor.css':'editor.css','/reader-vendor.js':'reader-vendor.js','/pdf.worker.mjs':'pdf.worker.mjs','/pdf-viewer.css':'pdf-viewer.css'}
             if path not in files: return self.send({'error':'Not found'},404)
             name=files[path]
-            self.send((ROOT/'static'/name).read_bytes(),ctype={'html':'text/html; charset=utf-8','js':'text/javascript; charset=utf-8','mjs':'text/javascript; charset=utf-8','css':'text/css; charset=utf-8'}[name.split('.')[-1]])
+            self.send((ROOT/'static'/name).read_bytes(),ctype={'json':'application/json; charset=utf-8','html':'text/html; charset=utf-8','js':'text/javascript; charset=utf-8','mjs':'text/javascript; charset=utf-8','css':'text/css; charset=utf-8'}[name.split('.')[-1]])
         except Exception as e: self.send({'error':str(e)},400)
     def do_POST(self):
         origin=self.headers.get('Origin')
@@ -348,6 +351,7 @@ class Handler(BaseHTTPRequestHandler):
             elif path=='/api/discovery/search': result=discovery.search(d['query'])
             elif path=='/api/discovery/graph': result=discovery.graph(d['id'],d.get('refresh',False))
             elif path=='/api/discovery/import': result=discovery.import_work(d['seed'],d['id'])
+            elif path=='/api/reader/auto': result=reader.auto_start(d['paper_id'],d.get('retry',False))
             elif path=='/api/reader/annotation': result=reader.save(d)
             elif path=='/api/reader/delete': result=reader.delete(d['id'])
             elif path=='/api/reader/explain': result=reader.explain(d['id'],d.get('mode','explain'),d.get('question',''))
@@ -358,6 +362,13 @@ class Handler(BaseHTTPRequestHandler):
             elif path=='/api/research/add':
                 result=research.add(d['value'])
                 if d.get('analyze',True): result={'paper':result,'job':research.start(result['id'])}
+            elif path=='/api/research/upload':
+                result=research.add_pdf(d)
+                response={'paper':result}
+                if d.get('analyze',False):
+                    try:response['job']=research.start(result['id'])
+                    except ValueError as error:response['warning']=str(error)
+                result=response
             elif path=='/api/research/analyze': result=research.start(d['id'])
             elif path=='/api/research/cancel': result=research.cancel(d['id'])
             elif path=='/api/research/note':
