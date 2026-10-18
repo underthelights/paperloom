@@ -103,3 +103,15 @@ class BilingualTests(unittest.TestCase):
         with patch.object(R,'cli',side_effect=ValueError('test timeout')):reader.auto_worker('paper')
         current=reader.auto_get('paper');self.assertEqual(current['status'],'error')
         self.assertEqual(current['blocks']['block-0'],value['blocks']['block-0'])
+
+    def test_wrapped_lines_decimals_and_abbreviations_do_not_split_sentences(self):
+        from bs4 import BeautifulSoup
+        source='Dr. Kim uses 3.14 units in Fig. 2 and Eq. 5\nwith e.g. two layers, i.e. a small model\nand compares Smith et al. fairly.\nWe obtain 2.75 points. Next sentence!'
+        node=BeautifulSoup('<p></p>','html.parser').p;node.string=source
+        _,_,segments=reader.sentence_segments(node,'block-test',7)
+        self.assertEqual(len(segments),3)
+        self.assertEqual(segments[0]['exact'],source[:source.index('We obtain')])
+        self.assertEqual(segments[1]['exact'],'We obtain 2.75 points. ')
+        self.assertEqual(segments[2]['exact'],'Next sentence!')
+        self.assertEqual(''.join(s['exact'] for s in segments),source)
+        self.assertEqual(segments[-1]['end'],7+reader.u16(source))

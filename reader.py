@@ -203,7 +203,7 @@ def sentence_segments(node,ident,start):
     template=''.join(c[0] for c in chunks);mapping=[]
     for value,a,b in chunks:mapping.extend([(a,b)]*len(value))
     boundaries=[0]
-    for match in re.finditer(r'(?<=[.!?。！？])\s+|\n+',template):
+    for match in re.finditer(r'(?<=[.!?。！？])\s+',template):
         prefix=template[:match.start()]
         if re.search(r'(?:\b(?:Fig|Eq|Dr|Mr|Mrs|Prof|vs|e\.g|i\.e)|et al)\.$',prefix,re.I):continue
         boundaries.append(match.end())
