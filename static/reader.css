@@ -46,3 +46,5 @@ body.reading-mode{grid-template-columns:240px minmax(500px,1fr)}.reading-mode .c
 #original-paper li+li,.prose li+li{margin-block-start:.65em}#original-paper p+p,.prose p+p{margin-block-start:1em}
 .bilingual-sentence{display:block;box-sizing:border-box;padding:5px 6px;border-radius:3px;line-height:1.85;transition:background-color .12s}.bilingual-sentence.sentence-linked{background:var(--accent-wash,#edf3ff);outline:1px solid var(--line)}.bilingual-sentence:focus-visible{outline:2px solid var(--accent)}.bilingual-unit-label{display:block;color:var(--muted);font:10px/1.6 system-ui;margin-bottom:5px}.sentence-aligned .bilingual-ko{white-space:normal}.sentence-has-source-note{border-inline-start:2px dotted var(--accent);padding-inline-start:8px}.original-only .bilingual-en-sentence{min-height:0!important}@media(max-width:1000px){.bilingual-sentence{min-height:0!important}}
 .sentence-aligned .bilingual-ko{font-size:16px;line-height:1.85}
+
+.bilingual-ko,#reader-panel,.equation-derivation{font-family:"IBM Plex Sans KR",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
