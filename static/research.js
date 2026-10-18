@@ -4,6 +4,11 @@ const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
 let selectionRequest=0;
 let state, paper, filter='papers', tab='brief', quote='', chatJob=null, noteTimer, activeId=localStorage.getItem('research.active'), pdfDoc=null, pdfPage=1, renderEpoch=0;
 const labels={candidate:'원문 미확인',ready:'분석 대기',analyzed:'브리프 있음',review:'검수 필요'};
+function paperDisplayStatus(p){
+ const job=state?.jobs?.find(j=>j.paper_id===p.id&&['queued','running'].includes(j.status));
+ if(job)return {label:job.status==='queued'?'대기열':(['reader','bilingual-reader'].includes(job.stage)?'본문 처리 중':'분석 중'),tone:job.status};
+ return {label:labels[p.status]||'미분류',tone:p.status};
+}
 const escape=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const safeURL=u=>{try{const v=new URL(u);return ['https:','http:'].includes(v.protocol)?v.href:'#'}catch{return '#'}};
 const link=(u,t)=>`<a href="${escape(safeURL(u))}" target="_blank" rel="noopener noreferrer">${escape(t)}</a>`;
@@ -18,7 +23,7 @@ let refreshPromise=null,sidebarSignature='',progressSignature='';
 async function refresh(){
  if(refreshPromise)return refreshPromise;
  refreshPromise=(async()=>{
-  state=await api('research');
+  state=await api('research');window.dispatchEvent(new Event('paperloom-state-changed'));
   const nextSidebar=JSON.stringify(state.papers);
   if(nextSidebar!==sidebarSignature){sidebarSignature=nextSidebar;renderList()}
   const nextProgress=JSON.stringify([activeId,state.jobs]);
@@ -30,8 +35,9 @@ function renderList(){
  $('#sync-label').textContent='개인 연구 라이브러리';
  const q=$('#search').value.trim().toLowerCase();const list=state.papers.filter(p=>p.status!=='candidate'&&((p.title+' '+(p.authors||[]).join(' ')).toLowerCase().includes(q))).sort((a,b)=>String(b.updated||'').localeCompare(String(a.updated||''))||a.id.localeCompare(b.id));
  $('#list-label').textContent=q?'검색 결과':'최근 작업';
- $('#paper-list').innerHTML=list.slice(0,5).map(p=>`<button class="paper-row ${p.id===activeId?'active':''}" data-paper="${p.id}"><strong>${escape(p.title)}</strong><small>${escape(p.year||'연도 미확인')} · ${escape(labels[p.status]||'분석 대기')}</small></button>`).join('')||'<div class="caption" style="padding:15px">'+(q?'일치하는 논문이 없습니다.':'새로 발견한 논문을 수집함에 넣으세요. 최근 작업만 여기에 표시됩니다.')+'</div>';
+ $('#paper-list').innerHTML=list.slice(0,5).map(p=>`<button class="paper-row ${p.id===activeId?'active':''}" data-paper="${p.id}"><strong>${escape(p.title)}</strong><small>${escape(p.year||'연도 미확인')} · ${escape(paperDisplayStatus(p).label)}</small></button>`).join('')||'<div class="caption" style="padding:15px">'+(q?'일치하는 논문이 없습니다.':'새로 발견한 논문을 수집함에 넣으세요. 최근 작업만 여기에 표시됩니다.')+'</div>';
 
+ $$('#paper-list strong').forEach(math);
 }
 let openPapers=[];
 try{openPapers=JSON.parse(localStorage.getItem('research.openPapers')||'[]').filter(x=>x&&typeof x.id==='string').slice(-20)}catch{}
@@ -57,6 +63,7 @@ async function closePaperTab(id=activeId){
 window.addEventListener('paperloom-close-active-tab',()=>closePaperTab());
 function renderPaperTabs(){
  const root=$('#paper-tabs');root.innerHTML=openPapers.map(p=>`<div class="paper-tab ${p.id===activeId?'active':''}"><button data-paper-tab="${escape(p.id)}" aria-current="${p.id===activeId?'page':'false'}" title="${escape(p.title)}">${escape(p.title)}</button><button data-close-paper="${escape(p.id)}" aria-label="${escape(p.title)} 닫기">×</button></div>`).join('')+'<button id="tab-library" title="서가에서 논문 열기">＋</button>';
+ $$('#paper-tabs [data-paper-tab]').forEach(math);
  root.onclick=async e=>{const close=e.target.closest('[data-close-paper]'),open=e.target.closest('[data-paper-tab]');if(close){await closePaperTab(close.dataset.closePaper)}else if(open){try{await select(open.dataset.paperTab)}catch(err){toast(err.message)}}else if(e.target.closest('#tab-library')){savePaperPosition();openCatalog({})}};
 }
 async function select(id,view){
@@ -71,7 +78,8 @@ function renderHeader(){
  $('#crumb').textContent='논문';
  const authors=(p.authors||[]).slice(0,2).join(' · ')+((p.authors||[]).length>2?' 외 '+(p.authors.length-2)+'명':'');
  const affiliations=[...new Set((r?.discovery?.affiliations||[]).map(a=>a.paper_affiliation).filter(a=>a&&a!=='확인 불가'))];
- $('#paper-header').innerHTML=`<div class="paper-kicker"><span>${escape(source)}</span><span class="paper-state" data-status="${escape(p.status)}">${escape(labels[p.status]||'미분류')}</span></div><h1>${escape(p.title)}</h1><div class="paper-meta"><button id="all-authors" title="저자와 연구실 보기">${escape(authors||'저자 정보 없음')}</button><span>${escape(p.year||'연도 미확인')}</span>${r?.created?`<span>${escape(r.created.slice(0,10))} 분석</span>`:''}</div><button id="reader-details" aria-expanded="false" aria-controls="paper-actions">정보·작업</button><div class="paper-actions" id="paper-actions">${p.url?link(p.url,'원문 ↗'):''}${p.arxiv?link('https://arxiv.org/pdf/'+p.arxiv,'PDF ↗'):''}<button id="reanalyze">${r?'분석 갱신':(p.arxiv||p.pdf_sha256)?'분석 시작':'원문 찾기'}</button>${affiliations.length?`<span class="paper-affiliations">${escape(affiliations.slice(0,3).join(' · '))}${affiliations.length>3?' 외 '+(affiliations.length-3)+'개 기관':''}</span>`:''}</div><details id="paper-links-disclosure"><summary>연결 노트</summary><div id="paper-workspace-links"></div></details>`;
+ $('#paper-header').innerHTML=`<div class="paper-kicker"><span>${escape(source)}</span><span class="paper-state" data-paper-status="${escape(p.id)}" data-status="${escape(paperDisplayStatus(p).tone)}">${escape(paperDisplayStatus(p).label)}</span></div><h1>${escape(p.title)}</h1><div class="paper-meta"><button id="all-authors" title="저자와 연구실 보기">${escape(authors||'저자 정보 없음')}</button><span>${escape(p.year||'연도 미확인')}</span>${r?.created?`<span>${escape(r.created.slice(0,10))} 분석</span>`:''}</div><button id="reader-details" aria-expanded="false" aria-controls="paper-actions">정보·작업</button><div class="paper-actions" id="paper-actions">${p.url?link(p.url,'원문 ↗'):''}${p.arxiv?link('https://arxiv.org/pdf/'+p.arxiv,'PDF ↗'):''}<button id="reanalyze">${r?'분석 갱신':(p.arxiv||p.pdf_sha256)?'분석 시작':'원문 찾기'}</button>${affiliations.length?`<span class="paper-affiliations">${escape(affiliations.slice(0,3).join(' · '))}${affiliations.length>3?' 외 '+(affiliations.length-3)+'개 기관':''}</span>`:''}</div><details id="paper-links-disclosure"><summary>연결 노트</summary><div id="paper-workspace-links"></div></details>`;
+ math($('#paper-header h1'));
  $('#reader-details').onclick=()=>{const expanded=document.body.classList.toggle('reader-details');$('#reader-details').setAttribute('aria-expanded',String(expanded));$('#reader-details').textContent=expanded?'정보 접기':'정보·작업'};
  $('#all-authors').onclick=()=>{$('[data-tab="labs"]').click()};
  $('#reanalyze').onclick=async()=>{if(!paper.arxiv&&!paper.pdf_sha256)return openImport(paper.title);try{await api('research/analyze',{id:paper.id});await refresh()}catch(e){toast(e.message)}};

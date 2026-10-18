@@ -8,6 +8,14 @@
   document.querySelectorAll('#tabs [data-tab]').forEach(button=>button.setAttribute('aria-selected',String(button.classList.contains('selected'))));
   const selected=menu.querySelector('button.selected');menu.querySelector('summary').textContent=selected?selected.textContent:'자료';
  }
+ window.addEventListener('paperloom-state-changed',()=>{
+  for(const element of document.querySelectorAll('[data-paper-status]')){
+   const entry=state?.papers?.find(p=>p.id===element.dataset.paperStatus);if(!entry)continue;
+   const status=paperDisplayStatus(entry);
+   if(element.textContent!==status.label)element.textContent=status.label;
+   if(element.classList.contains('paper-state'))element.dataset.status=status.tone;else element.dataset.state=status.tone;
+  }
+ });
  window.syncStudio=sync;
  toggle.setAttribute('aria-controls','research-context');
  toggle.onclick=()=>{const open=document.body.classList.toggle('context-open');document.body.classList.remove('no-side');localStorage.setItem('research.contextOpen',String(open));sync()};
