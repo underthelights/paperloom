@@ -2,3 +2,43 @@ body.reading-mode{grid-template-columns:240px minmax(500px,1fr)}.reading-mode .c
 .reading-mode .original-layout{display:block}.reading-mode #reader-panel{position:static;max-height:none;margin-top:30px;padding:20px;border:1px solid var(--line);border-radius:8px}#original-paper{font-size:16px;font-weight:400;line-height:1.85}#original-paper p{font-weight:400}.bilingual-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:28px;align-items:start;border-bottom:1px solid var(--line);padding:12px 0}.bilingual-row>p{margin:0!important}.bilingual-ko{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:15px;font-weight:400;white-space:pre-wrap;border-left:1px solid var(--line);padding-left:20px}.bilingual-ko.pending{color:var(--muted);font-size:12px}.original-only .bilingual-row{display:block}.original-only .bilingual-ko{display:none}.bilingual-options{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;align-items:center}.bilingual-options label{display:flex;align-items:center;gap:4px}.auto-label{border-bottom:3px solid}.auto-baseline{border-color:#84a6e8}.auto-claim{border-color:#d4b448}.auto-reasoning{border-color:#ad8cdb}.auto-experiment{border-color:#62af90}#bilingual-controls{padding:16px;background:var(--surface);border-radius:8px;margin-bottom:20px}#bilingual-status{font-size:12px;line-height:1.7}#bilingual-controls summary{font-size:12px;cursor:pointer}#auto-evidence{max-height:280px;overflow:auto}.auto-evidence-item{display:block;width:100%;text-align:left;border-bottom:1px solid var(--line)}.auto-evidence-item q,.auto-evidence-item span{display:block;font-size:12px;line-height:1.7}::highlight(auto-baseline){background:#84a6e840;color:inherit}::highlight(auto-claim){background:#d4b44845;color:inherit}::highlight(auto-reasoning){background:#ad8cdb40;color:inherit}::highlight(auto-experiment){background:#62af9040;color:inherit}@media(max-width:1000px){.bilingual-row{grid-template-columns:1fr;gap:12px}.bilingual-ko{border-left:3px solid var(--accent);padding-left:12px}}
 
 :root{--auto-baseline-bg:#dce7fb;--auto-claim-bg:#fff1b8;--auto-reasoning-bg:#e9ddf8;--auto-experiment-bg:#d4eee2}html[data-theme=dark]{--auto-baseline-bg:#293f5d;--auto-claim-bg:#51451f;--auto-reasoning-bg:#443252;--auto-experiment-bg:#244b3d}::highlight(auto-baseline){background:var(--auto-baseline-bg);color:inherit}::highlight(auto-claim){background:var(--auto-claim-bg);color:inherit}::highlight(auto-reasoning){background:var(--auto-reasoning-bg);color:inherit}::highlight(auto-experiment){background:var(--auto-experiment-bg);color:inherit}
+
+/* Keep displayed equations independent of compact bibliography/table typography. */
+#original-paper math{font-size:1.08em;line-height:1.5}
+#original-paper table math{font-size:16px}
+#original-paper math[display="block"],
+#original-paper .ltx_equation math,
+#original-paper .ltx_eqn_table math,
+#original-paper .ltx_equationgroup math{font-size:24px;line-height:1.6;max-width:100%;overflow-x:auto;overflow-y:hidden;padding-block:6px}
+#original-paper math[display="block"]{margin:22px 0;padding-block:10px}
+#original-paper .ltx_equation,#original-paper .ltx_eqn_table,#original-paper .ltx_equationgroup{max-width:100%;overflow-x:auto;overscroll-behavior-x:contain}
+#original-paper .ltx_eqn_table{font-size:16px}
+#original-paper .ltx_eqn_table td{padding-block:12px}
+#original-paper .ltx_tag_equation{font-size:14px;white-space:nowrap}
+.equation-derivation{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;font-weight:400;line-height:1.75;border:1px solid var(--line);border-radius:8px;background:var(--panel,var(--bg));margin:18px 0;min-width:0;max-width:100%;overflow-wrap:anywhere}
+.equation-derivation>summary{cursor:pointer;padding:12px 16px;font-weight:600;line-height:1.6;color:var(--ink)}
+.equation-derivation>summary:focus-visible,.equation-derivation summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.equation-derivation[open]>summary{border-bottom:1px solid var(--line)}
+.equation-derivation-body{padding:4px 16px 16px;min-width:0}
+.equation-derivation details{margin:12px 0;border-left:2px solid var(--line);padding:4px 0 4px 12px;min-width:0}
+.equation-derivation details>summary{cursor:pointer;font-size:14px;font-weight:600;padding:5px 0;line-height:1.7}
+#original-paper .equation-derivation h3,#original-paper .equation-derivation h4{font-size:15px;line-height:1.7;margin:16px 0 8px}
+#original-paper .equation-derivation p{font-family:inherit;font-size:14px;line-height:1.8;margin:10px 0}
+.equation-derivation .equation-basis{display:inline-block;font-size:11px;border:1px solid var(--line);border-radius:4px;padding:2px 7px;margin:4px 6px 4px 0;color:var(--muted)}
+.equation-derivation .equation-assumptions{font-size:12px;color:var(--muted);border-left:3px solid var(--accent);padding:8px 12px;background:var(--surface,var(--bg))}
+.equation-derivation .equation-steps{padding-left:22px;margin:12px 0}
+.equation-derivation .equation-steps>li{padding:6px 0 10px;line-height:1.8}
+.equation-derivation .equation-notation{max-width:100%;overflow-x:auto;overscroll-behavior-x:contain}
+#original-paper .equation-derivation table{display:block;max-width:100%;overflow-x:auto;border-collapse:collapse;font-size:13px;line-height:1.7;margin:12px 0}
+#original-paper .equation-derivation td,#original-paper .equation-derivation th{padding:9px 12px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+#original-paper .equation-derivation th{font-weight:600;background:var(--surface,var(--bg))}
+.equation-derivation pre{max-width:100%;overflow-x:auto;white-space:pre;font-size:12px;line-height:1.8;padding:12px;background:var(--surface,var(--bg));border-radius:5px}
+.equation-derivation code{font-size:.95em;overflow-wrap:anywhere}
+.equation-derivation .katex-display{font-size:20px;max-width:100%;overflow-x:auto;overflow-y:hidden;padding:8px 0;margin:14px 0}
+.equation-derivation .katex-display>.katex{font-size:1em}
+.equation-derivation .katex{font-size:1.08em}
+@media(max-width:700px){
+ #original-paper math[display="block"],#original-paper .ltx_equation math,#original-paper .ltx_eqn_table math,#original-paper .ltx_equationgroup math{font-size:22px}
+ .equation-derivation>summary{padding:10px 12px}.equation-derivation-body{padding:4px 12px 12px}.equation-derivation details{padding-left:8px}.equation-derivation .katex-display{font-size:20px}
+ #original-paper .equation-derivation td,#original-paper .equation-derivation th{padding:8px}
+}
