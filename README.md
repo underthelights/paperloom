@@ -89,3 +89,7 @@ Original HTML and Korean translations can be paired by source-anchored sentences
 ## Background paper jobs
 
 Paper collection, analysis, bilingual translation and concept generation share a FIFO admission queue: up to2 Codex processing calls run concurrently, with up to10 waiting. Interactive chat uses its separate streaming path. The top toolbar lists jobs across papers; paragraph counts drive translation progress, while analysis shows its current operation. Existing running jobs are preserved until the app is closed.
+
+## Concept learning
+
+Open 개념 노트 and enter a concept name. Latent Action includes a source-reviewed starting guide comparing LAPA, Genie and UniVLA, with pinned code references and separate source-derived shapes versus pedagogical numbers. Other concepts can generate the same structured guide through 학습자료 준비. Read explanations, compare papers, inspect typed source-linked graph edges and write an answer before revealing the reference answer. Answers and self-reported understanding are stored separately from research notes and included in Markdown/Jupyter exports. This is not an automatic mastery score or a spaced-repetition scheduler.

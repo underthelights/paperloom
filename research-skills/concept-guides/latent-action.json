@@ -1,0 +1,652 @@
+{
+  "version": 1,
+  "id": "latent-action",
+  "title": "잠재 행동: 영상의 변화를 실행 가능한 정책으로 연결하기",
+  "summary": "행동 라벨이 없는 영상에서 관측 전이를 코드로 압축하고, 그 코드를 예측하는 정책과 실행용 행동 경로를 구분한다. LAPA·Genie·UniVLA의 목적과 구현을 비교하며 최근접 양자화, 학습 미분, 설정별 shape를 근거와 함께 학습한다.",
+  "sections": [
+    {
+      "id": "definition",
+      "title": "영상의 변화 코드와 로봇 명령을 구분하기",
+      "body": "이 노트에서 잠재 행동은 두 관측 사이의 변화를 설명하도록 학습한 중간 표현이다. 영상만으로 감독 신호를 만들 수 있다는 것이 출발점이다. 실제 로봇의 관절 명령이나 힘 센서 값이 영상에 주어졌다는 뜻은 아니다.\n\n기호를 구분한다: 관측 x_t, 상태 표현 s_t=f(x_t), 잠재 행동 z_t=Q(E(x_t,x_{t+Δ})), 실행 명령 a_t. s_t는 현재 장면의 표현이고 z_t는 관측 쌍의 전이에 관한 표현이다. 같은 기호 z를 사용하는 영상 모델의 latent state와도 역할을 비교해야 한다.\n\n**수학적 반례:** 정지 물체를 카메라만 움직여 촬영해도 x_t≠x_{t+Δ}가 된다. 따라서 영상 차분이 존재한다는 사실만으로 로봇의 관절이 움직였다고 결론 내릴 수 없다. 복원 목적함수만으로 물리적 원인이나 제어 가능성이 유일하게 식별된다는 보장은 없다.",
+      "sources": [
+        {
+          "label": "LAPA 잠재 코드와 실제 행동 구분",
+          "url": "https://github.com/LatentActionPretraining/LAPA/blob/46aca51d7faebcec02d7d323bbb3820c2df07bc6/README.md#L43-L50"
+        },
+        {
+          "label": "UniVLA stage-2 두 코드 경로",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/genie/modules/lam.py#L243-L307"
+        },
+        {
+          "label": "Genie 논문 · 학습과 추론",
+          "url": "https://arxiv.org/html/2402.15391v1#S2"
+        }
+      ]
+    },
+    {
+      "id": "inverse-forward",
+      "title": "역동역학으로 코드 만들기, 순동역학으로 검증하기",
+      "body": "**공통 구조를 설명하는 기호식이며 모든 논문의 동일 구현식은 아니다.** 역동역학 인코더 E는 현재와 미래 관측을 함께 보고 변화 표현을 만든다. 양자화 Q가 이를 제한된 코드로 바꾼다. 순동역학 디코더 D는 현재 관측과 코드를 조건으로 미래 관측 또는 그 특징을 예측한다.\n\n복원 오차가 작아지도록 학습하면 코드는 예측에 필요한 정보를 전달해야 한다. 그러나 디코더가 현재 관측만으로 미래를 맞힐 수 있거나 코드가 배경을 저장하면, 작은 오차만으로 좋은 행동 표현을 보장하지 못한다.\n\nLAPA의 선택 코드에서는 첫 프레임 토큰을 detach하여 디코더 조건으로 사용하고 다음 프레임 픽셀 MSE를 계산한다. UniVLA 선택 코드에서는 현재 DINO 패치 특징과 양자화된 행동 특징을 결합해 미래 DINO 특징을 복원한다. UniVLA 논문 III-A의 일반 서술에는 과거 프레임을 디코더에 넣지 않는다는 문장이 있지만, 같은 절의 식과 확인한 코드에는 현재 O_t 조건이 있다. 이 노트는 해당 코드 경로를 기준으로 구분한다.",
+      "sources": [
+        {
+          "label": "LAPA 현재 프레임 조건·복원 손실",
+          "url": "https://github.com/LatentActionPretraining/LAPA/blob/46aca51d7faebcec02d7d323bbb3820c2df07bc6/laq/laq_model/latent_action_quantization.py#L220-L285"
+        },
+        {
+          "label": "UniVLA stage-1 언어 조건·복원",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/genie/modules/lam.py#L105-L158"
+        },
+        {
+          "label": "UniVLA stage-2 두 코드 경로",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/genie/modules/lam.py#L243-L307"
+        },
+        {
+          "label": "UniVLA 논문 · III절",
+          "url": "https://arxiv.org/html/2505.06111v1#S3"
+        }
+      ],
+      "equation": "z_t=Q(E(x_t,x_{t+\\Delta})),\\qquad \\hat y_{t+\\Delta}=D(y_t,z_t),\\qquad \\mathcal L_{rec}=\\operatorname{mean}[(\\hat y-y)^2]"
+    },
+    {
+      "id": "quantization",
+      "title": "최근접 코드 선택을 거리 계산부터 유도하기",
+      "body": "**정의:** 인코더 벡터 u∈R^d와 코드북 e_1,…,e_K∈R^d가 같은 공간에 있다고 하자. 코드 j는 유클리드 거리를 최소화하는 인덱스다. 제곱근은 음수가 아닌 값에서 단조 증가하므로 거리와 제곱거리의 argmin은 같다. 내적 분배법칙으로 ||u−e_j||²=||u||²−2uᵀe_j+||e_j||²를 얻는다. u에만 의존하는 첫 항은 후보 j 사이에서 같지만 거리 행렬 계산에는 포함할 수 있다.\n\n**행렬화:** U:[M,d], E:[K,d]일 때 U Eᵀ:[M,K]. 행별 ||u||²:[M,1]와 코드별 ||e||²:[1,K]를 broadcast한 뒤 argmin(dim=1)을 적용하면 indices:[M]이다. LAPA NSVQ의 실제 거리 계산이 이 전개를 사용한다. UniVLA는 torch.cdist와 마지막 축 argmin을 사용한다.\n\nK는 코드북 항목 수, n은 한 전이를 나타내는 토큰 개수다. 가능한 길이 n의 코드열은 최대 K^n개다. 이 수가 모두 관측되거나 서로 다른 물리적 행동에 일대일 대응한다는 뜻은 아니다.",
+      "sources": [
+        {
+          "label": "LAPA 차분·거리·NSVQ 학습",
+          "url": "https://github.com/LatentActionPretraining/LAPA/blob/46aca51d7faebcec02d7d323bbb3820c2df07bc6/laq/laq_model/nsvq.py#L128-L157"
+        },
+        {
+          "label": "UniVLA 최근접 코드와 straight-through",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/genie/modules/blocks.py#L398-L413"
+        }
+      ],
+      "equation": "j^*=\\arg\\min_j\\|u-e_j\\|_2^2=\\arg\\min_j\\left(\\|u\\|_2^2-2u^\\top e_j+\\|e_j\\|_2^2\\right)"
+    },
+    {
+      "id": "gradients",
+      "title": "정수 선택을 통과하는 학습: 두 구현은 다르다",
+      "body": "**UniVLA 코드에 해당:** argmin은 이산 선택이므로 그 자체를 보통의 미분 가능한 선형 연산처럼 취급할 수 없다. 구현의 z_q=u+stopgrad(e_j−u)는 forward 값으로 e_j를 반환하지만, 선택 경계의 진짜 도함수를 계산하는 대신 backward에서 ∂z_q/∂u=I를 사용한다. 이는 straight-through 추정 규칙이지 argmin의 정확한 미분이 아니다.\n\n코드북 손실 mean((stopgrad(u)−e_j)²)는 선택된 코드 벡터를 인코더 출력 쪽으로 이동시킨다. commitment 손실 mean((u−stopgrad(e_j))²)는 인코더 출력을 코드 쪽으로 끌어당긴다. UniVLA의 선택 설정은 β=0.25다. stage-2는 기존 비제어 코드북을 동결하지만 기존 질의 경로에 대한 손실도 계산한다.\n\n**LAPA에 동일 식을 덮어쓰지 않는다.** 확인한 학습 forward는 NSVQ: r∼N(0,I), ε=10⁻¹²에 대해 ũ=u+(||u−e_j||/||r||+ε)r를 사용한다. 이 코드의 수식은 ||r||>0일 때 정의된다. 추론 경로는 최근접 인덱스를 사용한다. 따라서 학습 중 양자화 노이즈와 추론 중 코드 조회를 별도로 읽어야 한다.",
+      "sources": [
+        {
+          "label": "UniVLA 최근접 코드와 straight-through",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/genie/modules/blocks.py#L398-L413"
+        },
+        {
+          "label": "UniVLA 복원·코드북·commitment 손실",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/genie/model.py#L90-L107"
+        },
+        {
+          "label": "UniVLA stage-2 선택 설정",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/config/lam-stage-2.yaml#L1-L34"
+        },
+        {
+          "label": "UniVLA 코드 개수·기존 코드북 동결",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/genie/modules/lam.py#L195-L240"
+        },
+        {
+          "label": "LAPA 차분·거리·NSVQ 학습",
+          "url": "https://github.com/LatentActionPretraining/LAPA/blob/46aca51d7faebcec02d7d323bbb3820c2df07bc6/laq/laq_model/nsvq.py#L128-L157"
+        },
+        {
+          "label": "LAPA 추론 시 양자화",
+          "url": "https://github.com/LatentActionPretraining/LAPA/blob/46aca51d7faebcec02d7d323bbb3820c2df07bc6/laq/laq_model/nsvq.py#L231-L267"
+        }
+      ],
+      "equation": "\\mathcal L=\\mathcal L_{rec}+\\operatorname{mean}[(\\operatorname{sg}(u)-e_j)^2]+\\beta\\operatorname{mean}[(u-\\operatorname{sg}(e_j))^2]"
+    },
+    {
+      "id": "lapa-shapes",
+      "title": "LAPA: 실제 설정으로 4개 코드를 얻는 경로",
+      "body": "**정적 코드 확인 범위:** commit 46aca51…의 laq/train_sthv2.py 하나를 선택한다. image_size=256, patch_size=32, dim=1024, quant_dim=32, codebook_size=8, code_seq_len=4다. 다른 체크포인트나 설정의 값으로 일반화하지 않는다. 모델은 실행하지 않았다.\n\n두 RGB 프레임 입력 [B,3,2,256,256]을 가정한 해당 경로에서 프레임별 패치 격자는 8×8이다. 패치 embedding·공간/시간 인코더 뒤 각 프레임의 토큰은 [B,64,1024]. NSVQ.encode는 Linear(1024,32) → [B,64,32], permute/reshape → [B,32,8,8]를 만든다.\n\nConv2d의 각 공간 크기는 floor((n+2p−(k−1)−1)/s+1)이다(dilation=1). 첫 k=3,s=2,p=1은 8→4, 다음 k=3,s=1,p=0은 4→2. 따라서 [B,32,2,2] → [4B,32]. 두 프레임에서 얻은 표현을 빼고 [8,32] 코드북과 비교하여 [4B,8] 거리 → [4B] 인덱스 → [B,4] 코드열을 얻는다.\n\n8⁴=4096은 이 설정의 조합 수다. 실제 코드 사용률, 학습된 코드 의미, 실행된 배치 B 및 측정 성능은 이 정적 검사로 확인할 수 없다.",
+      "sources": [
+        {
+          "label": "LAPA 선택 설정 · train_sthv2.py",
+          "url": "https://github.com/LatentActionPretraining/LAPA/blob/46aca51d7faebcec02d7d323bbb3820c2df07bc6/laq/train_sthv2.py#L6-L17"
+        },
+        {
+          "label": "LAPA 투영·공간 압축",
+          "url": "https://github.com/LatentActionPretraining/LAPA/blob/46aca51d7faebcec02d7d323bbb3820c2df07bc6/laq/laq_model/nsvq.py#L51-L103"
+        },
+        {
+          "label": "LAPA 차분·거리·NSVQ 학습",
+          "url": "https://github.com/LatentActionPretraining/LAPA/blob/46aca51d7faebcec02d7d323bbb3820c2df07bc6/laq/laq_model/nsvq.py#L128-L157"
+        },
+        {
+          "label": "LAPA 현재 프레임 조건·복원 손실",
+          "url": "https://github.com/LatentActionPretraining/LAPA/blob/46aca51d7faebcec02d7d323bbb3820c2df07bc6/laq/laq_model/latent_action_quantization.py#L220-L285"
+        }
+      ],
+      "equation": "8\\xrightarrow{k=3,s=2,p=1}4\\xrightarrow{k=3,s=1,p=0}2,\\qquad [B,32,2,2]\\to[4B,32]\\to[B,4]"
+    },
+    {
+      "id": "univla-shapes",
+      "title": "UniVLA: 작업 관련·무관 변화의 두 경로",
+      "body": "**정적 코드 확인 범위:** commit 0ab9e9d…의 lam-stage-2.yaml은 모델 폭768, 잠재 폭128, 코드북 크기16, 해상도224를 지정한다. num_codes=4는 모델 코드에서 별도로 정한다. 설정의 num_frames=16을 그대로 모델의 T로 쓰면 안 된다. vq_encode는 DINO 출력 재배치에 T=2를 명시한다. 여기서는 두 프레임 입력 조건만 설명한다.\n\n코드가 취하는 DINO 패치 특징을 [B,2,P,768]이라 두자. P의 실제 실행값은 측정하지 않았다. 224/14의 정규 패치 격자라는 추가 조건에서는 P=16²=256이다. stage-2는 그룹당 [B,2,4,768] 질의 두 그룹을 붙여 [B,2,P+8,768]로 처리한다. 미래 시점에서 그룹별 4개 질의를 뽑아 Linear(768,128), reshape [B,4,128], [16,128] 코드북 조회를 수행한다. 각 경로의 인덱스는 [B,4], 복원용 벡터는 [B,1,4,128]이다.\n\nstage-1은 언어 조건을 제공한다. stage-2는 언어 없이 두 잠재 경로를 추출하고 기존 코드북을 동결한 채 새로운 작업 중심 코드북을 학습한다. 이것이 완벽한 인과 분리를 증명하는 것은 아니다. 또한 논문명 UniVLA가 같은 다른 프로젝트와 혼동하지 않도록 OpenDriveLab 및 arXiv:2505.06111로 식별한다.",
+      "sources": [
+        {
+          "label": "UniVLA stage-2 선택 설정",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/config/lam-stage-2.yaml#L1-L34"
+        },
+        {
+          "label": "UniVLA 코드 개수·기존 코드북 동결",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/genie/modules/lam.py#L195-L240"
+        },
+        {
+          "label": "UniVLA stage-1 언어 조건·복원",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/genie/modules/lam.py#L105-L158"
+        },
+        {
+          "label": "UniVLA stage-2 두 코드 경로",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/genie/modules/lam.py#L243-L307"
+        },
+        {
+          "label": "UniVLA 최근접 코드와 straight-through",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/genie/modules/blocks.py#L398-L413"
+        }
+      ],
+      "equation": "[B,2,P,768]+2\\times[B,2,4,768]\\to[B,2,P+8,768]\\to[B,4,128]\\to[B,4]"
+    },
+    {
+      "id": "deployment",
+      "title": "미래 영상 없는 실행 시점에는 누가 행동하는가",
+      "body": "역동역학 모델은 학습 데이터에 잠재 라벨을 붙일 때 미래 프레임을 볼 수 있다. 실행 시점에는 그 미래가 아직 없으므로 정책이 현재 관측·지시문으로 코드를 예측해야 한다. 따라서 π(z|x_t,ℓ)를 학습하는 단계와 로봇별 실행 출력을 만드는 단계를 구분한다.\n\n**확인한 UniVLA LIBERO 코드:** 정책의 마지막 4개 잠재 행동 hidden token과 시각 embedding을 별도 pooling한다. MAPBlock 입력 폭4096, 내부폭512이며 Linear(512,7×window_size)+Tanh로 출력한다. 이어 reshape(-1,window_size,7), 시간적 집계, 데이터 통계 기반 역정규화 및 gripper 후처리가 적용된다. 기본 window_size=5는 이 클래스의 기본값이며 모든 실행 설정의 확정값은 아니다. 7은 이 실행 코드의 행동 채널 수이지 코드북 크기16이나 토큰 개수4가 아니다. 실제 로봇 드라이버의 단위·주기와 다른 embodiment의 출력 형태는 별도 확인이 필요하다.\n\nLAPA 공식 안내 역시 잠재 공간 출력만으로 실제 action 평가가 끝나지 않으며 행동 라벨을 이용한 fine-tuning이 필요하다고 구분한다. Genie의 기본 상호작용은 선택된 잠재 코드로 다음 영상 토큰을 생성하는 것이므로 그 자체를 로봇 모터 명령 API로 해석하면 안 된다.",
+      "sources": [
+        {
+          "label": "UniVLA LIBERO 실행용 행동 디코더",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/experiments/robot/libero/run_libero_eval.py#L100-L154"
+        },
+        {
+          "label": "UniVLA LIBERO 행동 후처리",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/experiments/robot/libero/run_libero_eval.py#L315-L338"
+        },
+        {
+          "label": "LAPA 잠재 코드와 실제 행동 구분",
+          "url": "https://github.com/LatentActionPretraining/LAPA/blob/46aca51d7faebcec02d7d323bbb3820c2df07bc6/README.md#L43-L50"
+        },
+        {
+          "label": "Genie 논문 · 학습과 추론",
+          "url": "https://arxiv.org/html/2402.15391v1#S2"
+        }
+      ],
+      "equation": "\\hat z_t\\sim\\pi_\\theta(\\cdot\\mid x_t,\\ell),\\qquad \\hat a_{t:t+H-1}=g_\\psi(\\hat z_t,\\text{관측 특징})"
+    },
+    {
+      "id": "worked-example",
+      "title": "숫자를 직접 대입하기: 교육용 예시",
+      "body": "**아래 숫자는 교육용이며 LAPA·Genie·UniVLA의 학습된 코드나 실제 tensor shape가 아니다.** u=(0.9,0.2), 코드북 e₀=(0,0), e₁=(1,0), e₂=(0,1)로 두자. 제곱거리는 각각 0.85, 0.05, 1.45이므로 j*=1, 양자화 벡터는 (1,0)이다. 인덱스1을 '오른쪽 관절을 1도'라고 읽을 근거는 없다.\n\n교육용 선형 디코더를 D(y,z)=y+z, 현재 특징 y=(2,3)이라 가정하면 예측은 (3,3). 실제 미래 특징을 (2.8,3.1)이라고 가정할 때 평균 제곱오차는 ((3−2.8)²+(3−3.1)²)/2=0.025다. 여기의 덧셈 디코더는 설명을 위해 정한 함수다. 실제 모델은 학습된 transformer이므로 이 덧셈을 실제 구현이라고 옮기면 안 된다.\n\n코드북 항목을 순열로 바꾸고 디코더의 조회도 같은 순열로 바꾸면 복원은 동일하게 만들 수 있다. 따라서 코드 번호 자체에는 고정된 자연어 의미가 없다. 의미를 붙이려면 여러 관측에서 같은 코드를 조건으로 한 결과와 실제 행동 대응을 확인해야 한다.",
+      "sources": [
+        {
+          "label": "LAPA 차분·거리·NSVQ 학습",
+          "url": "https://github.com/LatentActionPretraining/LAPA/blob/46aca51d7faebcec02d7d323bbb3820c2df07bc6/laq/laq_model/nsvq.py#L128-L157"
+        },
+        {
+          "label": "UniVLA 최근접 코드와 straight-through",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/genie/modules/blocks.py#L398-L413"
+        }
+      ],
+      "equation": "\\|u-e_0\\|^2=0.85,\\quad\\|u-e_1\\|^2=0.05,\\quad\\|u-e_2\\|^2=1.45\\quad\\Rightarrow j^*=1"
+    }
+  ],
+  "comparisons": [
+    {
+      "id": "lapa",
+      "name": "LAPA · 영상에서 VLA 사전학습",
+      "definition": "관측 쌍의 잠재 변화 코드를 학습하고 정책의 예측 라벨로 사용한다.",
+      "representation": "선택 train_sthv2 설정: 4개 토큰, 토큰당8개 후보, 코드 벡터 폭32.",
+      "learning": "픽셀 복원과 NSVQ 학습 경로; 정책은 잠재 라벨을 예측한다.",
+      "execution": "공식 안내는 실제 행동 공간으로의 fine-tuning을 요구한다.",
+      "limitations": "코드와 로봇 제어 명령은 동일하지 않다. 정적 shape 검사는 학습 결과 검증이 아니다.",
+      "sources": [
+        {
+          "label": "LAPA 논문 · 3절",
+          "url": "https://arxiv.org/html/2410.11758v1#S3"
+        },
+        {
+          "label": "LAPA 선택 설정 · train_sthv2.py",
+          "url": "https://github.com/LatentActionPretraining/LAPA/blob/46aca51d7faebcec02d7d323bbb3820c2df07bc6/laq/train_sthv2.py#L6-L17"
+        },
+        {
+          "label": "LAPA 차분·거리·NSVQ 학습",
+          "url": "https://github.com/LatentActionPretraining/LAPA/blob/46aca51d7faebcec02d7d323bbb3820c2df07bc6/laq/laq_model/nsvq.py#L128-L157"
+        },
+        {
+          "label": "LAPA 잠재 코드와 실제 행동 구분",
+          "url": "https://github.com/LatentActionPretraining/LAPA/blob/46aca51d7faebcec02d7d323bbb3820c2df07bc6/README.md#L43-L50"
+        }
+      ]
+    },
+    {
+      "id": "genie",
+      "name": "Genie · 행동으로 조건화하는 영상 환경",
+      "definition": "행동 라벨 없는 영상으로 잠재 행동을 학습해 상호작용 가능한 영상 생성을 조건화한다.",
+      "representation": "잠재 행동 인덱스와 영상 토큰은 역할이 다르다. 공식 실행 코드의 tensor shape는 이 검토에서 확인 불가.",
+      "learning": "영상 토크나이저·잠재 행동 모델·동역학 모델을 구분한다.",
+      "execution": "선택 코드의 embedding으로 다음 영상 토큰을 생성하고 이미지로 복원한다.",
+      "limitations": "로봇 영상 생성이 곧 실제 로봇 제어는 아니다. 논문의 별도 에이전트 전이 실험과 구분한다.",
+      "sources": [
+        {
+          "label": "Genie 논문 · 학습과 추론",
+          "url": "https://arxiv.org/html/2402.15391v1#S2"
+        },
+        {
+          "label": "Genie 공식 프로젝트",
+          "url": "https://sites.google.com/view/genie-2024/"
+        }
+      ]
+    },
+    {
+      "id": "univla",
+      "name": "UniVLA · 작업 중심 잠재 행동",
+      "definition": "DINO 특징과 언어 조건을 이용한 단계적 학습으로 작업 중심 잠재 코드를 구성한다.",
+      "representation": "선택 stage-2 코드: 경로별4개 토큰, 코드북16개 항목, 잠재 폭128.",
+      "learning": "기존 코드북 동결 후 작업 중심 경로 학습; 잠재 토큰 예측 정책과 실행용 디코더를 구분한다.",
+      "execution": "확인한 LIBERO 디코더는 latent hidden token과 시각 특징으로7채널 행동 chunk를 출력한다.",
+      "limitations": "완벽한 작업 관련·무관 인과 분리는 증명되지 않는다. 같은 이름의 다른 UniVLA와 구분해야 한다.",
+      "sources": [
+        {
+          "label": "UniVLA 논문 · III절",
+          "url": "https://arxiv.org/html/2505.06111v1#S3"
+        },
+        {
+          "label": "UniVLA stage-2 선택 설정",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/config/lam-stage-2.yaml#L1-L34"
+        },
+        {
+          "label": "UniVLA 코드 개수·기존 코드북 동결",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/genie/modules/lam.py#L195-L240"
+        },
+        {
+          "label": "UniVLA stage-2 두 코드 경로",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/genie/modules/lam.py#L243-L307"
+        },
+        {
+          "label": "UniVLA LIBERO 실행용 행동 디코더",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/experiments/robot/libero/run_libero_eval.py#L100-L154"
+        }
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "id": "latent-action",
+      "label": "잠재 행동",
+      "kind": "concept",
+      "section_id": "definition",
+      "sources": [
+        {
+          "label": "LAPA 잠재 코드와 실제 행동 구분",
+          "url": "https://github.com/LatentActionPretraining/LAPA/blob/46aca51d7faebcec02d7d323bbb3820c2df07bc6/README.md#L43-L50"
+        }
+      ]
+    },
+    {
+      "id": "inverse-dynamics",
+      "label": "역동역학",
+      "kind": "concept",
+      "section_id": "inverse-forward",
+      "sources": [
+        {
+          "label": "UniVLA stage-1 언어 조건·복원",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/genie/modules/lam.py#L105-L158"
+        }
+      ]
+    },
+    {
+      "id": "forward-dynamics",
+      "label": "순동역학 복원",
+      "kind": "concept",
+      "section_id": "inverse-forward",
+      "sources": [
+        {
+          "label": "LAPA 현재 프레임 조건·복원 손실",
+          "url": "https://github.com/LatentActionPretraining/LAPA/blob/46aca51d7faebcec02d7d323bbb3820c2df07bc6/laq/laq_model/latent_action_quantization.py#L220-L285"
+        }
+      ]
+    },
+    {
+      "id": "vector-quantization",
+      "label": "벡터 양자화",
+      "kind": "concept",
+      "section_id": "quantization",
+      "sources": [
+        {
+          "label": "UniVLA 최근접 코드와 straight-through",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/genie/modules/blocks.py#L398-L413"
+        }
+      ]
+    },
+    {
+      "id": "straight-through",
+      "label": "Straight-through 추정",
+      "kind": "concept",
+      "section_id": "gradients",
+      "sources": [
+        {
+          "label": "UniVLA 최근접 코드와 straight-through",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/genie/modules/blocks.py#L398-L413"
+        }
+      ]
+    },
+    {
+      "id": "action-decoder",
+      "label": "실행용 행동 디코더",
+      "kind": "concept",
+      "section_id": "deployment",
+      "sources": [
+        {
+          "label": "UniVLA LIBERO 실행용 행동 디코더",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/experiments/robot/libero/run_libero_eval.py#L100-L154"
+        }
+      ]
+    },
+    {
+      "id": "lapa",
+      "label": "LAPA",
+      "kind": "paper",
+      "comparison_id": "lapa",
+      "sources": [
+        {
+          "label": "LAPA 논문 · 3절",
+          "url": "https://arxiv.org/html/2410.11758v1#S3"
+        },
+        {
+          "label": "LAPA 선택 설정 · train_sthv2.py",
+          "url": "https://github.com/LatentActionPretraining/LAPA/blob/46aca51d7faebcec02d7d323bbb3820c2df07bc6/laq/train_sthv2.py#L6-L17"
+        },
+        {
+          "label": "LAPA 차분·거리·NSVQ 학습",
+          "url": "https://github.com/LatentActionPretraining/LAPA/blob/46aca51d7faebcec02d7d323bbb3820c2df07bc6/laq/laq_model/nsvq.py#L128-L157"
+        },
+        {
+          "label": "LAPA 잠재 코드와 실제 행동 구분",
+          "url": "https://github.com/LatentActionPretraining/LAPA/blob/46aca51d7faebcec02d7d323bbb3820c2df07bc6/README.md#L43-L50"
+        }
+      ]
+    },
+    {
+      "id": "genie",
+      "label": "Genie",
+      "kind": "paper",
+      "comparison_id": "genie",
+      "sources": [
+        {
+          "label": "Genie 논문 · 학습과 추론",
+          "url": "https://arxiv.org/html/2402.15391v1#S2"
+        },
+        {
+          "label": "Genie 공식 프로젝트",
+          "url": "https://sites.google.com/view/genie-2024/"
+        }
+      ]
+    },
+    {
+      "id": "univla",
+      "label": "UniVLA",
+      "kind": "paper",
+      "comparison_id": "univla",
+      "sources": [
+        {
+          "label": "UniVLA 논문 · III절",
+          "url": "https://arxiv.org/html/2505.06111v1#S3"
+        },
+        {
+          "label": "UniVLA stage-2 선택 설정",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/config/lam-stage-2.yaml#L1-L34"
+        },
+        {
+          "label": "UniVLA 코드 개수·기존 코드북 동결",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/genie/modules/lam.py#L195-L240"
+        },
+        {
+          "label": "UniVLA stage-2 두 코드 경로",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/genie/modules/lam.py#L243-L307"
+        },
+        {
+          "label": "UniVLA LIBERO 실행용 행동 디코더",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/experiments/robot/libero/run_libero_eval.py#L100-L154"
+        }
+      ]
+    }
+  ],
+  "relations": [
+    {
+      "source": "inverse-dynamics",
+      "target": "latent-action",
+      "type": "concept",
+      "label": "관측 쌍에서 변화 표현 추출",
+      "evidence_url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/genie/modules/lam.py#L105-L158"
+    },
+    {
+      "source": "latent-action",
+      "target": "forward-dynamics",
+      "type": "concept",
+      "label": "미래 복원의 조건으로 사용",
+      "evidence_url": "https://github.com/LatentActionPretraining/LAPA/blob/46aca51d7faebcec02d7d323bbb3820c2df07bc6/laq/laq_model/latent_action_quantization.py#L220-L285"
+    },
+    {
+      "source": "straight-through",
+      "target": "vector-quantization",
+      "type": "concept",
+      "label": "UniVLA의 학습용 미분 추정",
+      "evidence_url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/genie/modules/blocks.py#L398-L413"
+    },
+    {
+      "source": "lapa",
+      "target": "vector-quantization",
+      "type": "uses",
+      "label": "NSVQ 양자화 구현",
+      "evidence_url": "https://github.com/LatentActionPretraining/LAPA/blob/46aca51d7faebcec02d7d323bbb3820c2df07bc6/laq/laq_model/nsvq.py#L128-L157"
+    },
+    {
+      "source": "univla",
+      "target": "vector-quantization",
+      "type": "uses",
+      "label": "최근접 코드 조회 구현",
+      "evidence_url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/genie/modules/blocks.py#L398-L413"
+    },
+    {
+      "source": "univla",
+      "target": "action-decoder",
+      "type": "uses",
+      "label": "LIBERO 실행용 디코더 구현",
+      "evidence_url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/experiments/robot/libero/run_libero_eval.py#L100-L154"
+    },
+    {
+      "source": "genie",
+      "target": "latent-action",
+      "type": "uses",
+      "label": "영상 동역학 생성 조건",
+      "evidence_url": "https://arxiv.org/html/2402.15391v1#S2"
+    },
+    {
+      "source": "lapa",
+      "target": "genie",
+      "type": "citation",
+      "label": "LAPA 3.1절의 방법 계보 인용; 코드 직접 채택 주장 아님",
+      "evidence_url": "https://arxiv.org/html/2410.11758v1#S3"
+    }
+  ],
+  "questions": [
+    {
+      "id": "q1",
+      "prompt": "코드가1이면 특정 관절을1도 움직인다는 뜻인가?",
+      "answer": "아니다. 최근접 코드북 인덱스이며 의미는 학습된 표현과 downstream mapping에 달려 있다. 코드북 순열과 디코더 조회 순열을 함께 바꿔도 같은 결과를 만들 수 있다. 실제 행동 단위는 실행용 모델과 로봇 설정에서 확인해야 한다.",
+      "sources": [
+        {
+          "label": "LAPA 잠재 코드와 실제 행동 구분",
+          "url": "https://github.com/LatentActionPretraining/LAPA/blob/46aca51d7faebcec02d7d323bbb3820c2df07bc6/README.md#L43-L50"
+        },
+        {
+          "label": "UniVLA 최근접 코드와 straight-through",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/genie/modules/blocks.py#L398-L413"
+        },
+        {
+          "label": "UniVLA LIBERO 실행용 행동 디코더",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/experiments/robot/libero/run_libero_eval.py#L100-L154"
+        }
+      ]
+    },
+    {
+      "id": "q2",
+      "prompt": "미래 프레임을 쓰는 역동역학 모델을 실시간 정책으로 그대로 사용할 수 있는가?",
+      "answer": "이 노트의 관측 쌍 기반 라벨링 경로에서는 미래 프레임이 필요하므로 그대로는 불가능하다. 데이터 라벨링 후 현재 관측과 지시문으로 잠재 코드를 예측하는 정책을 학습하고, 실행용 행동 경로로 연결한다.",
+      "sources": [
+        {
+          "label": "LAPA 논문 · 3절",
+          "url": "https://arxiv.org/html/2410.11758v1#S3"
+        },
+        {
+          "label": "UniVLA 논문 · III절",
+          "url": "https://arxiv.org/html/2505.06111v1#S3"
+        },
+        {
+          "label": "UniVLA LIBERO 실행용 행동 디코더",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/experiments/robot/libero/run_libero_eval.py#L100-L154"
+        }
+      ]
+    },
+    {
+      "id": "q3",
+      "prompt": "LAPA의 8⁴와 UniVLA의16⁴는 무엇을 세는가?",
+      "answer": "선택 설정의 길이4 코드열 조합 상한이다. 각각4096과65536이다. 벡터 폭32·128, 배치 크기B, 로봇 행동 채널7과는 다른 수다. 모든 조합이 의미 있는 행동이거나 학습 중 사용됐다는 보장은 없다.",
+      "sources": [
+        {
+          "label": "LAPA 선택 설정 · train_sthv2.py",
+          "url": "https://github.com/LatentActionPretraining/LAPA/blob/46aca51d7faebcec02d7d323bbb3820c2df07bc6/laq/train_sthv2.py#L6-L17"
+        },
+        {
+          "label": "UniVLA stage-2 선택 설정",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/config/lam-stage-2.yaml#L1-L34"
+        },
+        {
+          "label": "UniVLA 코드 개수·기존 코드북 동결",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/genie/modules/lam.py#L195-L240"
+        }
+      ]
+    },
+    {
+      "id": "q4",
+      "prompt": "straight-through식에서 forward와 backward가 왜 다른가?",
+      "answer": "u+stopgrad(e−u)의 값은 e지만 stopgrad 안쪽의 미분은0으로 취급하므로 u에 대한 미분은I다. argmin의 실제 미분이 아니라 학습용 추정 규칙이다. LAPA 선택 구현은 NSVQ를 쓰므로 같은 규칙으로 설명하면 안 된다.",
+      "sources": [
+        {
+          "label": "UniVLA 최근접 코드와 straight-through",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/genie/modules/blocks.py#L398-L413"
+        },
+        {
+          "label": "LAPA 차분·거리·NSVQ 학습",
+          "url": "https://github.com/LatentActionPretraining/LAPA/blob/46aca51d7faebcec02d7d323bbb3820c2df07bc6/laq/laq_model/nsvq.py#L128-L157"
+        }
+      ]
+    },
+    {
+      "id": "q5",
+      "prompt": "복원 오차가 작으면 작업 중심 행동을 발견했다고 말할 수 있는가?",
+      "answer": "그것만으로는 부족하다. 카메라 이동이나 배경 변화도 복원에 유용할 수 있다. UniVLA는 두 코드 경로를 분리하는 학습을 제공하지만 코드에서 frozen codebook을 확인하는 것과 인과적으로 완전한 분리를 입증하는 것은 별개다.",
+      "sources": [
+        {
+          "label": "UniVLA stage-1 언어 조건·복원",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/genie/modules/lam.py#L105-L158"
+        },
+        {
+          "label": "UniVLA stage-2 두 코드 경로",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/genie/modules/lam.py#L243-L307"
+        },
+        {
+          "label": "UniVLA 코드 개수·기존 코드북 동결",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/genie/modules/lam.py#L195-L240"
+        }
+      ]
+    },
+    {
+      "id": "q6",
+      "prompt": "UniVLA가 출력한4개 토큰은 어떻게 LIBERO의 행동이 되는가?",
+      "answer": "확인한 구현은 마지막4개 latent hidden token과 시각 embedding을 pooling한 후 7×window_size 값으로 투영한다. chunk 재배치, 시간 집계, 역정규화, gripper 후처리가 이어진다. raw 인덱스4개를 모터 명령4개로 직접 전송하는 경로가 아니다.",
+      "sources": [
+        {
+          "label": "UniVLA LIBERO 실행용 행동 디코더",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/experiments/robot/libero/run_libero_eval.py#L100-L154"
+        },
+        {
+          "label": "UniVLA LIBERO 행동 후처리",
+          "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/experiments/robot/libero/run_libero_eval.py#L315-L338"
+        }
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "label": "LAPA 논문 · 3절",
+      "url": "https://arxiv.org/html/2410.11758v1#S3"
+    },
+    {
+      "label": "Genie 논문 · 학습과 추론",
+      "url": "https://arxiv.org/html/2402.15391v1#S2"
+    },
+    {
+      "label": "Genie 공식 프로젝트",
+      "url": "https://sites.google.com/view/genie-2024/"
+    },
+    {
+      "label": "UniVLA 논문 · III절",
+      "url": "https://arxiv.org/html/2505.06111v1#S3"
+    },
+    {
+      "label": "LAPA 선택 설정 · train_sthv2.py",
+      "url": "https://github.com/LatentActionPretraining/LAPA/blob/46aca51d7faebcec02d7d323bbb3820c2df07bc6/laq/train_sthv2.py#L6-L17"
+    },
+    {
+      "label": "LAPA 투영·공간 압축",
+      "url": "https://github.com/LatentActionPretraining/LAPA/blob/46aca51d7faebcec02d7d323bbb3820c2df07bc6/laq/laq_model/nsvq.py#L51-L103"
+    },
+    {
+      "label": "LAPA 차분·거리·NSVQ 학습",
+      "url": "https://github.com/LatentActionPretraining/LAPA/blob/46aca51d7faebcec02d7d323bbb3820c2df07bc6/laq/laq_model/nsvq.py#L128-L157"
+    },
+    {
+      "label": "LAPA 추론 시 양자화",
+      "url": "https://github.com/LatentActionPretraining/LAPA/blob/46aca51d7faebcec02d7d323bbb3820c2df07bc6/laq/laq_model/nsvq.py#L231-L267"
+    },
+    {
+      "label": "LAPA 현재 프레임 조건·복원 손실",
+      "url": "https://github.com/LatentActionPretraining/LAPA/blob/46aca51d7faebcec02d7d323bbb3820c2df07bc6/laq/laq_model/latent_action_quantization.py#L220-L285"
+    },
+    {
+      "label": "LAPA 잠재 코드와 실제 행동 구분",
+      "url": "https://github.com/LatentActionPretraining/LAPA/blob/46aca51d7faebcec02d7d323bbb3820c2df07bc6/README.md#L43-L50"
+    },
+    {
+      "label": "UniVLA stage-2 선택 설정",
+      "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/config/lam-stage-2.yaml#L1-L34"
+    },
+    {
+      "label": "UniVLA stage-1 언어 조건·복원",
+      "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/genie/modules/lam.py#L105-L158"
+    },
+    {
+      "label": "UniVLA stage-2 두 코드 경로",
+      "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/genie/modules/lam.py#L243-L307"
+    },
+    {
+      "label": "UniVLA 코드 개수·기존 코드북 동결",
+      "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/genie/modules/lam.py#L195-L240"
+    },
+    {
+      "label": "UniVLA 최근접 코드와 straight-through",
+      "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/genie/modules/blocks.py#L398-L413"
+    },
+    {
+      "label": "UniVLA 복원·코드북·commitment 손실",
+      "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/latent_action_model/genie/model.py#L90-L107"
+    },
+    {
+      "label": "UniVLA LIBERO 실행용 행동 디코더",
+      "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/experiments/robot/libero/run_libero_eval.py#L100-L154"
+    },
+    {
+      "label": "UniVLA LIBERO 행동 후처리",
+      "url": "https://github.com/OpenDriveLab/UniVLA/blob/0ab9e9dd3074ffa14fdd1a00aa2aa84e4f8e1352/experiments/robot/libero/run_libero_eval.py#L315-L338"
+    }
+  ]
+}
