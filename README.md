@@ -81,3 +81,7 @@ Research guidance is in `research-skills/`, with provenance and the upstream ELI
 - 파일과 추출 결과는 현재 프로필의 `data/research/uploads`에 보관합니다. 연구 라이브러리를 수동 백업할 때 `data/research` 전체를 포함하세요. 기존 `/api/backup`은 구형 라이브러리 백업이므로 연구 라이브러리 전체 백업을 대신하지 않습니다.
 
 검증: `python -m unittest discover -s tests -p test_pdf_import.py`, `node tests/pdf-import-ui.cjs` (Playwright Chrome 필요, 격리된 임시 데이터, AI 호출 없음).
+
+## Sentence-aligned reading
+
+Original HTML and Korean translations can be paired by source-anchored sentences. Hover or focus either language to locate its counterpart. AI category colors use independently validated exact English and Korean quotes. Selecting a Korean phrase saves that phrase and its corresponding full English sentence; cross-sentence Korean selections are currently unsupported. Existing paragraph translations remain available while missing sentence alignments are generated. Translation snapshots preserve prior Korean selections across later changes. AI translations and classifications still require comparison with the source.
